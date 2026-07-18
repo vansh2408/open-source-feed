@@ -1,0 +1,24 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# claude / AI assistant artifacts
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
+
+# logs
+*.log
+GITHUB_ISSUE_FEED_SPEC.md

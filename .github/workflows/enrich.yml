@@ -1,0 +1,22 @@
+name: enrich-issues
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # every 6 hours (slower cron per spec §12 Phase 3)
+  workflow_dispatch: {}
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: enrich-issues
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm ci
+      - run: npm run enrich
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ENRICH_MAX_ISSUES: "500"
+          RETENTION_DAYS: "5"

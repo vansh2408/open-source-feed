@@ -1,0 +1,24 @@
+name: poll-issues
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 min (GH Actions minimum granularity)
+  workflow_dispatch: {}
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    concurrency:              # never overlap runs
+      group: poll-issues
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm ci
+      - run: npm run poll:once
+        env:
+          # Custom PAT secret, NOT the auto-injected GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STARS_MIN: "100"
+          BACKFILL_HOURS: "24"
+          LANGUAGES: "javascript,typescript,python,go,rust,java"

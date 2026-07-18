@@ -1,0 +1,30 @@
+{
+  "name": "github-issues-feed",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "migrate": "tsx src/index.ts migrate",
+    "poll:once": "tsx src/index.ts poll:once",
+    "poll:watch": "tsx src/index.ts poll:watch",
+    "enrich": "tsx src/index.ts enrich",
+    "api": "tsx src/index.ts api",
+    "dev": "tsx watch src/index.ts api",
+    "feed": "tsx src/index.ts feed",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "fastify": "^5.10.0",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

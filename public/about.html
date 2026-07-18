@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About · issuefeed</title>
+<meta name="description" content="Why issuefeed exists: a live feed of fresh, unassigned open-source issues from popular repos: found minutes after they open, removed the moment they're claimed.">
+<meta property="og:title" content="About issuefeed">
+<meta property="og:description" content="A live feed of fresh, unassigned open-source issues: found in minutes, removed when claimed.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%232563eb%22/><text x=%2250%22 y=%2272%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>if</text></svg>">
+<style>
+  :root {
+    --bg: #ffffff; --ink: #111827; --muted: #6b7280; --faint: #9ca3af;
+    --hair: #e5e7eb; --hover-bg: #f9fafb; --input-border: #d1d5db;
+    --accent: #2563eb; --green: #16a34a;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --ink: #e6edf3; --muted: #8b949e; --faint: #6e7681;
+      --hair: #21262d; --hover-bg: #161b22; --input-border: #30363d;
+      --accent: #3b82f6; --green: #3fb950;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.65 var(--sans); }
+
+  .topbar { position: sticky; top: 0; z-index: 30; background: var(--bg); border-bottom: 1px solid var(--hair); }
+  .topbar-inner { padding: 15px 24px; display: flex; align-items: center; gap: 20px; }
+  .wordmark { font-size: 19px; font-weight: 800; letter-spacing: -.4px; color: var(--ink); text-decoration: none; }
+  .wordmark em { font-style: normal; color: var(--accent); }
+  .nav-link { margin-left: auto; font-size: 13.5px; color: var(--muted); text-decoration: none; font-weight: 500; }
+  .nav-link:hover { color: var(--accent); }
+
+  article { max-width: 660px; margin: 0 auto; padding: 44px 20px 72px; }
+  h1 { font-size: 27px; letter-spacing: -.5px; line-height: 1.25; margin: 0 0 10px; }
+  .lede { font-size: 16.5px; color: var(--muted); margin: 0 0 40px; }
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--faint); margin: 44px 0 14px; padding-top: 26px; border-top: 1px solid var(--hair);
+  }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  strong { font-weight: 650; }
+
+  .steps { display: flex; flex-direction: column; gap: 0; margin: 20px 0 6px; }
+  .step { display: flex; gap: 16px; padding: 14px 0; }
+  .step + .step { border-top: 1px dashed var(--hair); }
+  .step .when {
+    flex-shrink: 0; width: 96px; font-weight: 650; font-size: 13.5px;
+    color: var(--accent); font-variant-numeric: tabular-nums; padding-top: 1px;
+  }
+  .step .what { color: var(--muted); }
+  .step .what b { color: var(--ink); font-weight: 600; }
+
+  dl { margin: 0; }
+  dt { font-weight: 650; margin: 18px 0 4px; }
+  dd { margin: 0; color: var(--muted); }
+
+  .feedback {
+    margin-top: 18px; padding: 20px; border: 1px solid var(--hair); border-radius: 12px;
+    background: var(--hover-bg);
+  }
+  .feedback p { margin: 0 0 12px; }
+  .feedback .ways { display: flex; gap: 12px; flex-wrap: wrap; }
+  .ways a {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--input-border); border-radius: 8px; padding: 8px 14px;
+    font-size: 13.5px; font-weight: 500; color: var(--ink); text-decoration: none;
+    background: var(--bg);
+  }
+  .ways a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+  .ways svg { width: 14px; height: 14px; fill: currentColor; }
+
+  .cta { margin-top: 40px; }
+  .cta a {
+    display: inline-block; background: var(--accent); color: #fff; font-weight: 600;
+    padding: 11px 22px; border-radius: 9px; font-size: 14.5px;
+  }
+  .cta a:hover { text-decoration: none; filter: brightness(1.08); }
+  footer { max-width: 660px; margin: 0 auto; padding: 0 20px 40px; font-size: 12.5px; color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="wordmark" href="/">issue<em>feed</em></a>
+    <a class="nav-link" href="/">← back to the feed</a>
+  </div>
+</div>
+
+<article>
+  <h1>Find open-source issues before anyone else claims them.</h1>
+  <p class="lede">issuefeed is a live feed of fresh, open, <strong>unassigned</strong> issues
+  from popular repositories, surfaced minutes after they're opened and removed the moment
+  someone claims them.</p>
+
+  <h2>The problem</h2>
+  <p>Contributing to open source has a cold-start problem: by the time you find a good issue,
+  someone else is already on it. GitHub's own search makes it surprisingly hard to answer
+  "what just opened in projects that matter?" Most issue-discovery sites run on slow
+  batch pipelines, so the "good first issues" they show are often days old, already assigned,
+  or already fixed.</p>
+  <p>The result: beginners waste their motivation on dead leads, and genuinely fresh,
+  claimable issues go unseen.</p>
+
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="step">
+      <span class="when">every 5 min</span>
+      <span class="what"><b>Fetch.</b> New issues are discovered within minutes of being
+      opened: open, unassigned, in JavaScript, TypeScript, Python, Go, Rust or Java
+      repositories with <b>100★+</b>.</span>
+    </div>
+    <div class="step">
+      <span class="when">every 6 h</span>
+      <span class="what"><b>Re-verify.</b> Issues get claimed or closed after we find them,
+      so every listed issue is re-checked against GitHub, and anything no longer open and
+      unassigned silently drops out. Comment counts are refreshed at the same time.</span>
+    </div>
+    <div class="step">
+      <span class="when">after 5 days</span>
+      <span class="what"><b>Expire.</b> This is a freshness feed, not an archive. Issues age
+      out after five days, so everything you see is recent enough to be worth claiming.</span>
+    </div>
+  </div>
+
+  <h2>Reading the feed</h2>
+  <p>Everything in the list is open and unassigned as of the last verification pass.
+  Two signals worth watching:</p>
+  <p><strong>💬 0 comments</strong> means nobody has even started discussing the issue.
+  Those are the truly uncontested ones. <strong>NEW</strong> marks issues created since your
+  previous visit. Bookmark anything interesting with the flag icon (saved in your browser);
+  filter by language, stars or labels; and every filtered view is shareable, because the filters
+  live in the URL.</p>
+
+  <h2>Subscribe instead of checking</h2>
+  <p>The <a href="/feed.xml">RSS/Atom feed</a> accepts the same filters as the page. Set your
+  filters, click <em>rss</em> in the header, and paste that URL into any feed reader.
+  New matching issues get pushed to you without you ever visiting the site. For example:
+  <code>/feed.xml?language=rust&amp;labels=good first issue</code>.</p>
+
+  <h2>FAQ</h2>
+  <dl>
+    <dt>Why only repos with 100+ stars?</dt>
+    <dd>It's a quality floor: enough traction that the project is maintained and a merged PR
+    means something. Use the min-stars filter to raise it further.</dd>
+    <dt>Are my bookmarks synced anywhere?</dt>
+    <dd>No. They're stored in your browser (localStorage). No accounts, no tracking. A saved
+    issue stays in your bookmarks even after it expires from the feed.</dd>
+    <dt>Can an issue still be taken by the time I click it?</dt>
+    <dd>Possible but unlikely to be stale by much: worst case, the assignment happened within
+    the last verification window. Always check the issue thread before starting work, and
+    comment to claim it.</dd>
+    <dt>Which languages are covered?</dt>
+    <dd>JavaScript, TypeScript, Python, Go, Rust and Java today. More are easy to add.
+    Ask for one below.</dd>
+  </dl>
+
+  <h2>Feedback</h2>
+  <div class="feedback">
+    <p>issuefeed is young and shaped by what contributors actually need. Found a bug, want a
+    language added, or have an idea?</p>
+    <div class="ways">
+      <a href="https://github.com/vansh2408/open-source-feed/issues/new" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"/></svg>
+        Open a GitHub issue
+      </a>
+      <a href="mailto:vansh@vaudit.com?subject=issuefeed%20feedback">
+        <svg viewBox="0 0 16 16"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2ZM1.5 12.251c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V5.809L8.38 9.397a.75.75 0 0 1-.76 0L1.5 5.809Zm13-8.181v-.32a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25v.32L8 7.88Z"/></svg>
+        Email feedback
+      </a>
+    </div>
+  </div>
+
+  <div class="cta"><a href="/">Open the feed →</a></div>
+</article>
+
+<footer>no accounts · no tracking · your bookmarks never leave your browser</footer>
+</body>
+</html>
