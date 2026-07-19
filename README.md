@@ -64,6 +64,10 @@ npm run api             # open http://localhost:3000
 - `GET /languages`: distinct languages present (drives the UI dropdown)
 - `GET /status`: poller heartbeat (`lastPollAt`), drives the UI sync countdown
 - `GET /health`: DB liveness
+- `GET|POST /internal/poll`: trigger one polling pass (for external cron pingers).
+  Requires `POLL_TRIGGER_TOKEN` via `Authorization: Bearer` header or `?token=`;
+  responds `202` immediately and runs the pass in the background, `busy` if one
+  is already running
 
 ## Configuration
 
@@ -83,13 +87,26 @@ are missing.
 | `ENRICH_MAX_ISSUES` | 500 | Re-verifications per enrich run |
 | `FEED_PAGE_SIZE` | 50 | Default API page size |
 | `PORT` | 3000 | API port |
+| `POLL_TRIGGER_TOKEN` | (unset) | Shared secret enabling `/internal/poll`; endpoint is off when unset |
 
 ## Deploying
 
-1. Push this repo to GitHub.
-2. Add two Actions secrets: `GH_FEED_TOKEN` (your PAT, deliberately **not** the
-   auto-injected `GITHUB_TOKEN`, so polling uses your own API quota) and `DATABASE_URL`.
-   The workflows in `.github/workflows/` then poll every 5 minutes and enrich every 6
-   hours with zero infrastructure.
-3. Host the API anywhere always-on (Fly.io / Railway / Render hobby tier) with the same
-   two env vars plus `POLL_INTERVAL_SECONDS=300` so the UI countdown matches the cron.
+The whole app (frontend + API + Atom feed) is one Node service, deployed free on
+Render with an external pinger driving the poll cadence.
+
+1. **Render**: [New → Blueprint](https://dashboard.render.com/select-repo?type=blueprint),
+   pick this repo — `render.yaml` defines the free web service (build `npm ci`,
+   start `npm start` = migrate then serve). Set the two secrets it prompts for:
+   `GITHUB_TOKEN` (classic PAT, no scopes) and `DATABASE_URL` (Neon pooled).
+   `POLL_TRIGGER_TOKEN` is generated automatically.
+2. **Pinger**: on [cron-job.org](https://cron-job.org) (free), create a job hitting
+   `https://<service>.onrender.com/internal/poll` every 5 minutes with header
+   `Authorization: Bearer <POLL_TRIGGER_TOKEN>` (copy the generated value from the
+   Render dashboard). This one ping both triggers a polling pass and keeps the
+   free-tier service from sleeping. `POLL_INTERVAL_SECONDS=300` in `render.yaml`
+   keeps the UI countdown honest.
+3. **GitHub Actions backup**: add Actions secrets `GH_FEED_TOKEN` (your PAT,
+   deliberately **not** the auto-injected `GITHUB_TOKEN`, so polling uses your own
+   API quota) and `DATABASE_URL`. The workflows then poll every 30 minutes as a
+   fallback (covers pinger/host outages via `BACKFILL_HOURS=24`) and enrich every
+   6 hours.

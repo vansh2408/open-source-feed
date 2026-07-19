@@ -1,10 +1,12 @@
+import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { Config } from './config.js';
 import { listLanguages, readFeed, type FeedQuery } from './db.js';
+import { pollOnce } from './poller.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(__dirname, '..', 'public', 'index.html');
@@ -69,6 +71,56 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     await pool.query('SELECT 1');
     return { ok: true };
   });
+
+  // External-cron poll trigger (e.g. cron-job.org every 5 min). The ping also
+  // keeps a free-tier host awake. Responds 202 immediately; the pass runs in
+  // the background because a full multi-language pass outlives pinger timeouts.
+  let pollRunning = false;
+  let lastPoll: { startedAt: string; ok: boolean; inserted?: number; error?: string } | null = null;
+
+  const pollAuthorized = (req: FastifyRequest): boolean => {
+    if (!config.pollTriggerToken) return false;
+    const auth = req.headers.authorization;
+    const presented = auth?.startsWith('Bearer ')
+      ? auth.slice('Bearer '.length)
+      : (req.query as Record<string, string | undefined>).token;
+    if (!presented) return false;
+    const a = Buffer.from(presented);
+    const b = Buffer.from(config.pollTriggerToken);
+    return a.length === b.length && timingSafeEqual(a, b);
+  };
+
+  const triggerPoll = async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!config.pollTriggerToken) {
+      return reply.code(503).send({ error: 'POLL_TRIGGER_TOKEN not configured' });
+    }
+    if (!pollAuthorized(req)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (pollRunning) {
+      return reply.code(200).send({ status: 'busy', lastPoll });
+    }
+    pollRunning = true;
+    const startedAt = new Date().toISOString();
+    void pollOnce(pool, config)
+      .then((results) => {
+        const inserted = results.reduce((sum, r) => sum + r.inserted, 0);
+        lastPoll = { startedAt, ok: true, inserted };
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        lastPoll = { startedAt, ok: false, error: message.slice(0, 200) };
+        console.error('triggered poll pass failed:', lastPoll.error);
+      })
+      .finally(() => {
+        pollRunning = false;
+      });
+    return reply.code(202).send({ status: 'started', lastPoll });
+  };
+
+  // GET as well as POST: some free pingers (UptimeRobot) can only send GET.
+  app.post('/internal/poll', triggerPoll);
+  app.get('/internal/poll', triggerPoll);
 
   app.get('/languages', async () => {
     return { languages: await listLanguages(pool) };

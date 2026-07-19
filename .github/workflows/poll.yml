@@ -1,7 +1,7 @@
 name: poll-issues
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 min (GH Actions minimum granularity)
+    - cron: "*/30 * * * *"  # backup only: primary polling is the Render service via /internal/poll; BACKFILL_HOURS=24 covers any gap
   workflow_dispatch: {}
 jobs:
   poll:

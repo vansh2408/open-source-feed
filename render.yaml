@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: issuefeed
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GITHUB_TOKEN # classic PAT, no scopes (public data only)
+        sync: false
+      - key: DATABASE_URL # Neon POOLED connection string (host has -pooler)
+        sync: false
+      - key: POLL_TRIGGER_TOKEN # shared secret for /internal/poll
+        generateValue: true
+      - key: POLL_INTERVAL_SECONDS # match the external pinger cadence so the UI countdown is honest
+        value: "300"
+      - key: STARS_MIN
+        value: "100"
+      - key: BACKFILL_HOURS
+        value: "24"
+      - key: LANGUAGES
+        value: javascript,typescript,python,go,rust,java
+      - key: ENRICH_MAX_ISSUES
+        value: "500"
+      - key: RETENTION_DAYS
+        value: "5"

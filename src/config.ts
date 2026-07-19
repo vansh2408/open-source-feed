@@ -12,6 +12,8 @@ export interface Config {
   port: number;
   enrichMaxIssues: number;
   retentionDays: number;
+  /** Shared secret for POST /internal/poll; endpoint is disabled when unset. */
+  pollTriggerToken: string | null;
 }
 
 function requireEnv(name: string): string {
@@ -59,5 +61,6 @@ export function loadConfig(): Config {
     port: intEnv('PORT', 3000),
     enrichMaxIssues: intEnv('ENRICH_MAX_ISSUES', 500),
     retentionDays: intEnv('RETENTION_DAYS', 5),
+    pollTriggerToken: process.env.POLL_TRIGGER_TOKEN?.trim() || null,
   };
 }
