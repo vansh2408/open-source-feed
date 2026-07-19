@@ -1,5 +1,7 @@
 # open source feed
 
+**Live at [opensourcefeed.dev](https://opensourcefeed.dev)**
+
 A live feed of **fresh, open, unassigned** issues from popular open-source repositories,
 surfaced minutes after they're opened, and removed the moment they're claimed.
 

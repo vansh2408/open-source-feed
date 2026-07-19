@@ -12,6 +12,7 @@ import { pollOnce } from './poller.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(__dirname, '..', 'public', 'index.html');
 const ABOUT_HTML = path.join(__dirname, '..', 'public', 'about.html');
+const OG_PNG = path.join(__dirname, '..', 'public', 'og.png');
 
 const MAX_PAGE_SIZE = 200;
 // Star/offset params compare against Postgres integer columns; anything
@@ -91,6 +92,12 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   app.get('/about', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     return readFile(ABOUT_HTML, 'utf8');
+  });
+
+  // Social-preview card (og:image target for link unfurls).
+  app.get('/og.png', async (_req, reply) => {
+    reply.type('image/png').header('cache-control', 'public, max-age=86400');
+    return readFile(OG_PNG);
   });
 
   app.get('/health', async () => {
