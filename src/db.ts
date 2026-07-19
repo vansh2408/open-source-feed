@@ -9,11 +9,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export function createPool(databaseUrl: string): pg.Pool {
   const host = new URL(databaseUrl).hostname;
   const isLocal = host === 'localhost' || host === '127.0.0.1';
-  return new pg.Pool({
+  const pool = new pg.Pool({
     connectionString: databaseUrl,
     max: 5,
+    keepAlive: true,
     ...(isLocal ? {} : { ssl: true }),
   });
+  // Neon's pooler drops idle connections; without a listener the resulting
+  // 'error' event crashes the process (observed as a crash loop on Render).
+  pool.on('error', (err) => {
+    console.error('idle db client error (recovering):', err.message);
+  });
+  return pool;
 }
 
 export async function migrate(pool: pg.Pool): Promise<void> {
