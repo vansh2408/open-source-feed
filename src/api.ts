@@ -178,7 +178,7 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     reply.type('application/atom+xml; charset=utf-8');
     return `<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <title>issuefeed: fresh, unassigned, claimable open-source issues</title>
+  <title>open source feed: fresh, unassigned, claimable issues</title>
   <subtitle>New contribution-ready issues from 100★+ repos, minutes after they open.</subtitle>
   <id>${xmlEscape(`${base}/feed.xml`)}</id>
   <link href="${xmlEscape(selfUrl)}" rel="self"/>

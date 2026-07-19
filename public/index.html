@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>issuefeed · fresh, unassigned, claimable</title>
+<title>open source feed · fresh, unassigned, claimable</title>
 <meta name="description" content="Live feed of fresh, unassigned open-source issues in popular JavaScript, TypeScript, Python, Go, Rust and Java repos. Claim before anyone else.">
-<meta property="og:title" content="issuefeed · fresh, unassigned, claimable open-source issues">
+<meta property="og:title" content="open source feed · fresh, unassigned, claimable issues">
 <meta property="og:description" content="New contribution-ready issues from 100★+ repos, minutes after they're opened. Filter by language, labels and stars.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#2563eb">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%232563eb%22/><text x=%2250%22 y=%2272%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>if</text></svg>">
-<link rel="alternate" type="application/atom+xml" title="issuefeed" href="/feed.xml">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%232563eb%22/><text x=%2250%22 y=%2266%22 font-size=%2244%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>osf</text></svg>">
+<link rel="alternate" type="application/atom+xml" title="open source feed" href="/feed.xml">
 <style>
   :root {
     --bg: #ffffff; --ink: #111827; --muted: #6b7280; --faint: #9ca3af;
@@ -32,7 +32,7 @@
   /* ---------- top bar ---------- */
   .topbar { position: sticky; top: 0; z-index: 30; background: var(--bg); border-bottom: 1px solid var(--hair); }
   .topbar-inner { padding: 15px 24px; display: flex; align-items: center; gap: 20px; }
-  .wordmark { font-size: 19px; font-weight: 800; letter-spacing: -.4px; }
+  .wordmark { font-size: 19px; font-weight: 800; letter-spacing: -.4px; white-space: nowrap; }
   .wordmark em { font-style: normal; color: var(--accent); }
   .nav-right { margin-left: auto; display: flex; align-items: center; }
   .nav-right > * { padding: 0 16px; border-left: 1px solid var(--hair); white-space: nowrap; }
@@ -230,17 +230,26 @@
     .sync { display: none; }       /* keep the top bar to essentials */
     .nav-right > * { padding: 0 10px; }
   }
+  /* phone widths: the long wordmark + full nav exceed the viewport, so
+     drop secondary text and keep icon/count/links only */
+  @media (max-width: 600px) {
+    .topbar-inner { gap: 10px; }
+    .wordmark { font-size: 16.5px; }
+    #status { display: none; }     /* the green dot alone signals live */
+    .bm-label { display: none; }   /* bookmark icon + count still shown */
+    .nav-right > * { padding: 0 8px; }
+  }
 </style>
 </head>
 <body>
 <div class="topbar">
   <div class="topbar-inner">
-    <span class="wordmark" title="fresh, open, unassigned issues from 100★+ repos">issue<em>feed</em></span>
+    <span class="wordmark" title="fresh, open, unassigned issues from 100★+ repos">open source <em>feed</em></span>
     <div class="nav-right">
       <span class="live"><span class="dot"></span><span id="status">loading…</span></span>
       <span class="sync" id="sync" title="time until the poller fetches new issues from GitHub"></span>
       <button class="nav-bm" id="bm-toggle" title="your bookmarks (saved in this browser)">
-        <svg viewBox="0 0 16 16"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg>Bookmarks<span class="cnt" id="bm-count">0</span>
+        <svg viewBox="0 0 16 16"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg><span class="bm-label">Bookmarks</span><span class="cnt" id="bm-count">0</span>
       </button>
       <a class="nav-about" href="/about">About</a>
       <a class="rss" id="rss-link" href="/feed.xml" title="Atom feed for RSS readers. Keeps your current filters.">RSS</a>

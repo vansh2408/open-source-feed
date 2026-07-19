@@ -1,4 +1,4 @@
-# issuefeed
+# open source feed
 
 A live feed of **fresh, open, unassigned** issues from popular open-source repositories,
 surfaced minutes after they're opened, and removed the moment they're claimed.
