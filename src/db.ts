@@ -195,10 +195,11 @@ export interface FeedQuery {
   limit: number;
   offset?: number;
   minStars?: number;
+  maxStars?: number;
   labels?: string[];
   language?: string;
   search?: string;
-  sort?: 'newest' | 'stars' | 'comments';
+  sort?: 'newest' | 'stars' | 'stars_asc' | 'comments' | 'comments_asc';
 }
 
 export async function readFeed(pool: pg.Pool, query: FeedQuery): Promise<FeedRow[]> {
@@ -209,6 +210,10 @@ export async function readFeed(pool: pg.Pool, query: FeedQuery): Promise<FeedRow
   if (query.minStars !== undefined) {
     params.push(query.minStars);
     where.push(`repo_stars >= $${params.length}`);
+  }
+  if (query.maxStars !== undefined) {
+    params.push(query.maxStars);
+    where.push(`repo_stars <= $${params.length}`);
   }
   if (query.labels && query.labels.length > 0) {
     // Case-insensitive any-match: GitHub label casing varies ("Bug" vs "bug").
@@ -226,12 +231,13 @@ export async function readFeed(pool: pg.Pool, query: FeedQuery): Promise<FeedRow
     where.push(`title ILIKE $${params.length}`);
   }
 
-  const orderBy =
-    query.sort === 'stars'
-      ? 'repo_stars DESC, created_at DESC'
-      : query.sort === 'comments'
-        ? 'comments DESC, created_at DESC'
-        : 'created_at DESC';
+  const ORDER_BY: Record<string, string> = {
+    stars: 'repo_stars DESC, created_at DESC',
+    stars_asc: 'repo_stars ASC, created_at DESC',
+    comments: 'comments DESC, created_at DESC',
+    comments_asc: 'comments ASC, created_at DESC',
+  };
+  const orderBy = ORDER_BY[query.sort ?? ''] ?? 'created_at DESC';
 
   params.push(query.limit);
   const limitPos = params.length;

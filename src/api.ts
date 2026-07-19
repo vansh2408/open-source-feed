@@ -13,27 +13,41 @@ const INDEX_HTML = path.join(__dirname, '..', 'public', 'index.html');
 const ABOUT_HTML = path.join(__dirname, '..', 'public', 'about.html');
 
 const MAX_PAGE_SIZE = 200;
+// Star/offset params compare against Postgres integer columns; anything
+// larger than int4 max would make the query itself error.
+const INT4_MAX = 2_147_483_647;
 
 function intParam(value: unknown, fallback: number, max?: number): number {
   if (typeof value !== 'string' || value.trim() === '') return fallback;
-  const n = Number.parseInt(value, 10);
+  // Number, not parseInt: parseInt truncates exponent notation ("1e9" -> 1).
+  const n = Math.floor(Number(value));
   if (!Number.isFinite(n) || n < 0) return fallback;
   return max !== undefined ? Math.min(n, max) : n;
 }
 
 /** Shared by /issues and /feed.xml so both take the same filter params. */
-function parseFeedQuery(q: Record<string, string | undefined>, config: Config): FeedQuery {
+function parseFeedQuery(rawQ: Record<string, unknown>, config: Config): FeedQuery {
+  // Fastify parses repeated keys (?labels=a&labels=b) as arrays; normalize to
+  // strings so nothing below throws or leaks an array into a SQL param.
+  const q: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(rawQ)) {
+    if (Array.isArray(v)) q[k] = k === 'labels' ? v.join(',') : String(v[v.length - 1]);
+    else if (typeof v === 'string') q[k] = v;
+  }
+
   const labels = q.labels
     ?.split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-  const sort = q.sort === 'stars' || q.sort === 'comments' ? q.sort : undefined;
+  const SORTS = ['stars', 'stars_asc', 'comments', 'comments_asc'] as const;
+  const sort = SORTS.find((s) => s === q.sort);
 
   return {
     limit: intParam(q.limit, config.feedPageSize, MAX_PAGE_SIZE),
-    offset: intParam(q.offset, 0),
-    ...(q.min_stars !== undefined ? { minStars: intParam(q.min_stars, 0) } : {}),
+    offset: intParam(q.offset, 0, INT4_MAX),
+    ...(q.min_stars !== undefined ? { minStars: intParam(q.min_stars, 0, INT4_MAX) } : {}),
+    ...(q.max_stars !== undefined ? { maxStars: intParam(q.max_stars, INT4_MAX, INT4_MAX) } : {}),
     ...(labels && labels.length > 0 ? { labels } : {}),
     ...(q.language ? { language: q.language } : {}),
     ...(q.q?.trim() ? { search: q.q.trim() } : {}),
@@ -131,9 +145,13 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     const { rows } = await pool.query<{ last_poll_at: Date | null }>(
       'SELECT max(last_poll_at) AS last_poll_at FROM poll_state'
     );
+    const last = rows[0]?.last_poll_at ?? null;
     return {
-      lastPollAt: rows[0]?.last_poll_at ?? null,
+      lastPollAt: last,
       pollIntervalSeconds: config.pollIntervalSeconds,
+      // Relative age so clients can schedule refreshes immune to their own
+      // clock skew (client clocks routinely drift by minutes).
+      secondsSinceLastPoll: last ? Math.max(0, Math.round((Date.now() - last.getTime()) / 1000)) : null,
     };
   });
 
@@ -141,7 +159,7 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   app.get('/issues', async (req) => {
     const issues = await readFeed(
       pool,
-      parseFeedQuery(req.query as Record<string, string | undefined>, config)
+      parseFeedQuery(req.query as Record<string, unknown>, config)
     );
     return { count: issues.length, issues };
   });
@@ -151,7 +169,7 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   app.get('/feed.xml', async (req, reply) => {
     const issues = await readFeed(
       pool,
-      parseFeedQuery(req.query as Record<string, string | undefined>, config)
+      parseFeedQuery(req.query as Record<string, unknown>, config)
     );
 
     const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';

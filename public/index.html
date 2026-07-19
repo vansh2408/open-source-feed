@@ -71,6 +71,8 @@
   .side-divider { border: 0; border-top: 1px solid var(--hair); margin: 0 0 24px; }
 
   form { display: flex; flex-direction: column; gap: 16px; }
+  .star-range { display: flex; gap: 10px; }
+  .star-range label { flex: 1; min-width: 0; }
   form label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--muted); }
   form input, form select {
     background: var(--bg); color: var(--ink); border: 1px solid var(--input-border);
@@ -280,9 +282,14 @@
           <option value="">all</option>
         </select>
       </label>
-      <label>Min Stars (floor 100)
-        <input type="number" name="min_stars" min="100" step="100" placeholder="100">
-      </label>
+      <div class="star-range">
+        <label title="everything ingested has at least 100 stars">Min stars
+          <input type="number" name="min_stars" min="100" step="100" placeholder="100">
+        </label>
+        <label>Max stars
+          <input type="number" name="max_stars" min="100" step="100" placeholder="any">
+        </label>
+      </div>
       <label>Labels (any match)
         <input type="text" name="labels" placeholder="good first issue, bug">
       </label>
@@ -302,7 +309,9 @@
         <select id="sort" title="sort order">
           <option value="">newest</option>
           <option value="stars">most stars</option>
+          <option value="stars_asc">fewest stars</option>
           <option value="comments">most comments</option>
+          <option value="comments_asc">fewest comments</option>
         </select>
         <span class="search">
           <svg viewBox="0 0 24 24" stroke-width="2" fill="none"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -324,7 +333,6 @@
 </div>
 
 <script>
-  const REFRESH_MS = 60_000;
   const LAST_VISIT_KEY = 'issuefeed:lastVisit';
   // GitHub's own language colors: instantly recognizable to developers.
   const LANG_COLORS = {
@@ -368,21 +376,31 @@
     document.getElementById('bm-count').textContent = Object.keys(bookmarks).length;
   }
 
-  // ---- "next sync" countdown, driven by the poller's real last_poll_at.
-  let lastPollAt = null;
+  // ---- "next sync" countdown + refresh schedule, driven by the poller's
+  // real cadence. Everything is computed from the server-reported RELATIVE
+  // age (secondsSinceLastPoll), never by comparing server timestamps against
+  // Date.now(): client clocks routinely drift by minutes.
   let pollIntervalSec = 300;
+  let syncDeadline = null;     // client-clock instant the next poll is due
+  let dataAgeSec = null;       // how old the newest poll was when /status answered
   async function loadStatus() {
     try {
       const res = await fetch('/status');
       const d = await res.json();
-      lastPollAt = d.lastPollAt ? new Date(d.lastPollAt).getTime() : null;
       pollIntervalSec = d.pollIntervalSeconds || 300;
+      if (typeof d.secondsSinceLastPoll === 'number') {
+        dataAgeSec = d.secondsSinceLastPoll;
+        syncDeadline = Date.now() + Math.max(0, pollIntervalSec - dataAgeSec) * 1000;
+      } else {
+        dataAgeSec = null;
+        syncDeadline = null;
+      }
     } catch { /* countdown just hides */ }
   }
   function tickSync() {
     const el = document.getElementById('sync');
-    if (!lastPollAt) { el.textContent = ''; return; }
-    const remaining = lastPollAt + pollIntervalSec * 1000 - Date.now();
+    if (!syncDeadline) { el.textContent = ''; return; }
+    const remaining = syncDeadline - Date.now();
     if (remaining > 0) {
       const m = Math.floor(remaining / 60000);
       const s = Math.floor((remaining % 60000) / 1000);
@@ -393,6 +411,31 @@
     }
   }
   setInterval(tickSync, 1000);
+
+  // ---- schedule-aware refresh: between polls the feed cannot change, so
+  // refresh just after the next poll should land instead of on a fixed timer.
+  const ERROR_RETRY_MS = 60_000;  // failed load: plain fixed retry, like the old timer
+  const CATCHUP_MS = 60_000;      // fresh data may still be mid-pass on the server
+  const SYNC_BUFFER_MS = 45_000;  // a poll pass takes time to finish writing
+  function nextRefreshDelay() {
+    if (!syncDeadline) return ERROR_RETRY_MS;
+    // A pass stamps last_poll_at while it is still writing; if the data is
+    // very fresh, look again soon so a slow pass's rows aren't hidden for a
+    // whole cycle.
+    if (dataAgeSec !== null && dataAgeSec < 90) return CATCHUP_MS;
+    const wait = syncDeadline + SYNC_BUFFER_MS - Date.now();
+    // Clamp: the floor keeps overdue polls retrying, the ceiling bounds the
+    // damage of any scheduling mistake. Jitter so many open tabs don't all
+    // refresh in the same instant.
+    return Math.min(Math.max(wait, 30_000), pollIntervalSec * 1000 + 60_000) + Math.random() * 5000;
+  }
+  function scheduleRefresh(delayMs) {
+    clearTimeout(timer);
+    if (offset !== 0 || bookmarksMode) return; // "Load more" pages and bookmarks are never auto-refreshed
+    timer = setTimeout(() => {
+      if (offset === 0 && !bookmarksMode) load(); // re-check: state may have changed while waiting
+    }, delayMs);
+  }
 
   // "New since your last visit": baseline is when you PREVIOUSLY opened the
   // page; anything created after that is tagged NEW for this whole visit.
@@ -424,7 +467,7 @@
   function formParams() {
     const d = new FormData(form);
     const p = new URLSearchParams();
-    for (const k of ['language', 'min_stars', 'labels', 'limit']) {
+    for (const k of ['language', 'min_stars', 'max_stars', 'labels', 'limit']) {
       const v = (d.get(k) || '').toString().trim();
       if (v && !(k === 'limit' && v === '50')) p.set(k, v);
     }
@@ -444,9 +487,13 @@
 
   function restoreFromUrl() {
     const p = new URLSearchParams(location.search);
-    for (const k of ['language', 'min_stars', 'labels', 'limit']) {
+    for (const k of ['language', 'min_stars', 'max_stars', 'labels', 'limit']) {
       if (p.has(k)) form.elements[k].value = p.get(k);
     }
+    // Normalize a shared link's sub-floor minimum here, so a later focus/blur
+    // on the field doesn't surprise-rewrite it and reload mid-session.
+    const ms = form.elements['min_stars'];
+    if (ms.value !== '' && Number(ms.value) < 100) ms.value = '100';
     if (p.has('q')) searchInput.value = p.get('q');
     if (p.has('sort')) sortSel.value = p.get('sort');
   }
@@ -502,7 +549,7 @@
     list.innerHTML = Array.from({ length: n }, () => '<li class="skel"></li>').join('');
   }
 
-  const SORT_NAMES = { '': 'newest', stars: 'most stars', comments: 'most comments' };
+  const SORT_NAMES = { '': 'newest', stars: 'most stars', stars_asc: 'fewest stars', comments: 'most comments', comments_asc: 'fewest comments' };
 
   function renderBookmarks() {
     const saved = Object.values(bookmarks)
@@ -535,7 +582,6 @@
       const html = data.issues.map(render).join('');
       if (append) list.insertAdjacentHTML('beforeend', html);
       else list.innerHTML = html;
-      loadStatus();
       const pageSize = Number(form.elements['limit'].value) || 50;
       moreBtn.hidden = data.issues.length < pageSize;
       message.hidden = list.children.length > 0;
@@ -549,11 +595,14 @@
       message.hidden = false;
       message.className = 'error';
       message.textContent = 'Failed to load: ' + err.message;
+      markActivePresets();
+      scheduleRefresh(ERROR_RETRY_MS); // always retry the feed itself after a failure
+      return;
     }
     markActivePresets();
-    clearTimeout(timer);
-    // Auto-refresh only while on page 1, so "Load more" results aren't yanked away.
-    if (offset === 0) timer = setTimeout(() => load(), REFRESH_MS);
+    // Fetch status only after the list and its pagination UI are fully
+    // rendered (no suspension between DOM writes), then schedule from it.
+    loadStatus().then(() => scheduleRefresh(nextRefreshDelay()));
   }
 
   async function loadLanguages() {
@@ -600,6 +649,7 @@
     bookmarksMode = false;
     form.elements['labels'].value = '';
     form.elements['min_stars'].value = '';
+    form.elements['max_stars'].value = '';
     form.elements['language'].value = '';
     searchInput.value = '';
     sortSel.value = '';
@@ -651,12 +701,24 @@
   // Blur once the choice is made so the focus ring doesn't linger.
   form.elements['language'].addEventListener('change', (e) => { e.target.blur(); applyFilters(); });
   let filterTimer;
-  for (const name of ['min_stars', 'labels', 'limit']) {
+  for (const name of ['min_stars', 'max_stars', 'labels', 'limit']) {
     form.elements[name].addEventListener('input', () => {
       clearTimeout(filterTimer);
       filterTimer = setTimeout(applyFilters, 450);
     });
   }
+  // Nothing below 100 stars is ever ingested, so a sub-100 minimum is
+  // meaningless; floor it once the field is left (not while typing, so
+  // entering "560" isn't fought at the "5"). Max deliberately isn't clamped:
+  // max_stars=50 legitimately means "no results", and rewriting it to 100
+  // would show the very repos the user tried to exclude.
+  const minStarsEl = form.elements['min_stars'];
+  minStarsEl.addEventListener('blur', () => {
+    if (minStarsEl.value !== '' && Number(minStarsEl.value) < 100) {
+      minStarsEl.value = '100';
+      if (!bookmarksMode) applyFilters(); // in bookmarks view just fix the field
+    }
+  });
 
   sortSel.addEventListener('change', () => { sortSel.blur(); bookmarksMode = false; syncUrl(); load(); });
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') searchInput.blur(); });
