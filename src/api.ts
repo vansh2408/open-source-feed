@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { Config } from './config.js';
@@ -69,7 +70,18 @@ function xmlEscape(s: string): string {
 
 /** Lean read API + static frontend + Atom feed. */
 export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
-  const app = Fastify({ logger: false });
+  // trustProxy: behind Render's proxy the client IP arrives in
+  // x-forwarded-for; without this the rate limiter would bucket every
+  // visitor under the proxy's IP.
+  const app = Fastify({ logger: false, trustProxy: true });
+
+  // Per-IP limit, in-memory (single instance). Generous enough for a human
+  // plus an aggressive feed reader; stops one client from burning the DB.
+  await app.register(rateLimit, {
+    max: 120,
+    timeWindow: '1 minute',
+    allowList: (req) => req.url === '/health', // Render's own health checks
+  });
 
   app.get('/', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');

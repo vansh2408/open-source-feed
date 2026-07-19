@@ -454,10 +454,11 @@
     return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
   }
 
+  // Values land inside quoted HTML attributes, so quotes MUST be escaped too
+  // (the textContent/innerHTML trick doesn't cover them).
   function esc(s) {
-    const div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   function labelColor(l) {
