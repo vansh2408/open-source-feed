@@ -38,8 +38,6 @@
   .nav-right > * { padding: 0 16px; border-left: 1px solid var(--hair); white-space: nowrap; }
   .nav-right > *:first-child { border-left: 0; }
   .nav-right > *:last-child { padding-right: 0; }
-  .live { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
   a.rss, a.nav-about { font-size: 13.5px; font-weight: 500; color: var(--muted); text-decoration: none; }
   a.rss:hover, a.nav-about:hover { color: var(--accent); }
 
@@ -60,9 +58,16 @@
     background: none; border: 0; text-align: left; cursor: pointer;
     padding: 7px 10px; margin: 0 -10px; border-radius: 7px;
     font-size: 14px; color: var(--ink);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .preset svg {
+    width: 14px; height: 14px; flex-shrink: 0;
+    fill: none; stroke: var(--faint); stroke-width: 1.4; stroke-linejoin: round;
   }
   .preset:hover { background: var(--hover-bg); }
+  .preset:hover svg { stroke: var(--muted); }
   .preset.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--bg)); font-weight: 600; }
+  .preset.active svg { stroke: var(--accent); }
   .side-divider { border: 0; border-top: 1px solid var(--hair); margin: 0 0 24px; }
 
   form { display: flex; flex-direction: column; gap: 16px; }
@@ -75,15 +80,9 @@
     outline: none; border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
   }
-  .apply {
-    margin-top: 10px; background: var(--accent); color: var(--accent-ink);
-    border: 0; border-radius: 9px; padding: 12px; font-size: 14.5px; font-weight: 600;
-    cursor: pointer; transition: filter .12s ease;
-  }
-  .apply:hover { filter: brightness(1.08); }
   .clear-all {
     background: none; border: 0; color: var(--muted); font-size: 13.5px;
-    cursor: pointer; padding: 12px; margin-top: 2px;
+    cursor: pointer; padding: 12px; margin-top: 10px;
   }
   .clear-all:hover { color: var(--ink); }
 
@@ -201,6 +200,10 @@
     font-size: 13.5px; cursor: pointer;
   }
   .more:hover { color: var(--accent); border-color: var(--accent); }
+  /* author display:block beats the hidden attribute's UA rule; restore it */
+  .more[hidden] { display: none; }
+  .bm-exit { font-size: 13.5px; font-weight: 500; color: var(--accent); text-decoration: none; white-space: nowrap; }
+  .bm-exit:hover { text-decoration: underline; }
   .empty, .error { padding: 56px 24px; text-align: center; font-size: 14px; color: var(--muted); }
   .error { color: #dc2626; }
   footer { padding: 8px 28px 36px; font-size: 12.5px; color: var(--faint); }
@@ -235,8 +238,8 @@
   @media (max-width: 600px) {
     .topbar-inner { gap: 10px; }
     .wordmark { font-size: 16.5px; }
-    #status { display: none; }     /* the green dot alone signals live */
     .bm-label { display: none; }   /* bookmark icon + count still shown */
+    .nav-right > .nav-bm { border-left: 0; }  /* .sync hidden here, so Bookmarks is visually first */
     .nav-right > * { padding: 0 8px; }
   }
 </style>
@@ -246,7 +249,6 @@
   <div class="topbar-inner">
     <span class="wordmark" title="fresh, open, unassigned issues from 100★+ repos">open source <em>feed</em></span>
     <div class="nav-right">
-      <span class="live"><span class="dot"></span><span id="status">loading…</span></span>
       <span class="sync" id="sync" title="time until the poller fetches new issues from GitHub"></span>
       <button class="nav-bm" id="bm-toggle" title="your bookmarks (saved in this browser)">
         <svg viewBox="0 0 16 16"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg><span class="bm-label">Bookmarks</span><span class="cnt" id="bm-count">0</span>
@@ -263,12 +265,12 @@
   <aside class="sidebar">
     <div class="side-label">Quick filters</div>
     <div class="presets" id="presets">
-      <button class="preset" data-labels="good first issue">good first issue</button>
-      <button class="preset" data-labels="help wanted">help wanted</button>
-      <button class="preset" data-labels="bug">bug</button>
-      <button class="preset" data-labels="documentation,docs">docs</button>
-      <button class="preset" data-min_stars="1000">+1k stars</button>
-      <button class="preset" data-min_stars="10000">+10k stars</button>
+      <button class="preset" data-labels="good first issue"><svg viewBox="0 0 16 16"><path d="M7.6 1.5H2.25a.75.75 0 0 0-.75.75V7.6c0 .2.08.39.22.53l6.15 6.15a.75.75 0 0 0 1.06 0l5.35-5.35a.75.75 0 0 0 0-1.06L8.13 1.72a.75.75 0 0 0-.53-.22Z"/><circle cx="4.75" cy="4.75" r="1"/></svg>good first issue</button>
+      <button class="preset" data-labels="help wanted"><svg viewBox="0 0 16 16"><path d="M7.6 1.5H2.25a.75.75 0 0 0-.75.75V7.6c0 .2.08.39.22.53l6.15 6.15a.75.75 0 0 0 1.06 0l5.35-5.35a.75.75 0 0 0 0-1.06L8.13 1.72a.75.75 0 0 0-.53-.22Z"/><circle cx="4.75" cy="4.75" r="1"/></svg>help wanted</button>
+      <button class="preset" data-labels="bug"><svg viewBox="0 0 16 16"><path d="M7.6 1.5H2.25a.75.75 0 0 0-.75.75V7.6c0 .2.08.39.22.53l6.15 6.15a.75.75 0 0 0 1.06 0l5.35-5.35a.75.75 0 0 0 0-1.06L8.13 1.72a.75.75 0 0 0-.53-.22Z"/><circle cx="4.75" cy="4.75" r="1"/></svg>bug</button>
+      <button class="preset" data-labels="documentation,docs"><svg viewBox="0 0 16 16"><path d="M7.6 1.5H2.25a.75.75 0 0 0-.75.75V7.6c0 .2.08.39.22.53l6.15 6.15a.75.75 0 0 0 1.06 0l5.35-5.35a.75.75 0 0 0 0-1.06L8.13 1.72a.75.75 0 0 0-.53-.22Z"/><circle cx="4.75" cy="4.75" r="1"/></svg>docs</button>
+      <button class="preset" data-min_stars="1000"><svg viewBox="0 0 16 16"><path d="M8 1.75l1.9 3.85 4.25.62-3.08 3 .73 4.23L8 11.45l-3.8 2 .73-4.23-3.08-3 4.25-.62Z"/></svg>+1k stars</button>
+      <button class="preset" data-min_stars="10000"><svg viewBox="0 0 16 16"><path d="M8 1.75l1.9 3.85 4.25.62-3.08 3 .73 4.23L8 11.45l-3.8 2 .73-4.23-3.08-3 4.25-.62Z"/></svg>+10k stars</button>
     </div>
     <hr class="side-divider">
     <div class="side-label">Advanced</div>
@@ -287,7 +289,6 @@
       <label>Limit
         <input type="number" name="limit" min="1" max="200" value="50">
       </label>
-      <button type="submit" class="apply">Apply Filters</button>
       <button type="button" class="clear-all" id="clear-all">Clear all</button>
     </form>
   </aside>
@@ -296,6 +297,7 @@
     <div class="list-head">
       <button class="filters-toggle" id="filters-toggle">☰ Filters</button>
       <span class="count"><b id="count">…</b><span class="sortedby" id="sortedby">· sorted by newest</span></span>
+      <a class="bm-exit" id="bm-exit" href="#" hidden>← back to the feed</a>
       <div class="tools">
         <select id="sort" title="sort order">
           <option value="">newest</option>
@@ -344,7 +346,6 @@
   const form = document.getElementById('filters');
   const list = document.getElementById('list');
   const message = document.getElementById('message');
-  const status = document.getElementById('status');
   const countEl = document.getElementById('count');
   const sortedbyEl = document.getElementById('sortedby');
   const moreBtn = document.getElementById('more');
@@ -514,13 +515,14 @@
     message.textContent = 'No bookmarks yet. Click the flag icon on any issue to save it here.';
     countEl.textContent = saved.length + ' bookmarked';
     sortedbyEl.textContent = '';
+    document.getElementById('bm-exit').hidden = false;
     clearTimeout(timer);
     markActivePresets();
   }
 
   async function load({ append = false } = {}) {
     if (bookmarksMode) { renderBookmarks(); return; }
-    status.textContent = 'refreshing…';
+    document.getElementById('bm-exit').hidden = true;
     if (!append) offset = 0;
     if (firstLoad) { showSkeletons(); firstLoad = false; }
     try {
@@ -542,13 +544,11 @@
       const fresh = list.querySelectorAll('.fresh').length;
       countEl.textContent = list.children.length + ' issues';
       sortedbyEl.textContent = '· sorted by ' + SORT_NAMES[sortSel.value] + (fresh ? ' · ' + fresh + ' new since last visit' : '');
-      status.textContent = 'updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch (err) {
       list.innerHTML = '';
       message.hidden = false;
       message.className = 'error';
       message.textContent = 'Failed to load: ' + err.message;
-      status.textContent = 'error';
     }
     markActivePresets();
     clearTimeout(timer);
@@ -574,6 +574,12 @@
 
   document.getElementById('bm-toggle').addEventListener('click', () => {
     bookmarksMode = !bookmarksMode;
+    load();
+  });
+
+  document.getElementById('bm-exit').addEventListener('click', (e) => {
+    e.preventDefault();
+    bookmarksMode = false;
     load();
   });
 
@@ -632,13 +638,28 @@
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    document.activeElement?.blur();
     bookmarksMode = false;
     document.body.classList.remove('side-open');
     syncUrl();
     load();
   });
 
-  sortSel.addEventListener('change', () => { bookmarksMode = false; syncUrl(); load(); });
+  // Sidebar filters apply on their own: the select instantly, typed fields
+  // debounced like the search box, so no Apply button is needed.
+  const applyFilters = () => { bookmarksMode = false; syncUrl(); load(); };
+  // Blur once the choice is made so the focus ring doesn't linger.
+  form.elements['language'].addEventListener('change', (e) => { e.target.blur(); applyFilters(); });
+  let filterTimer;
+  for (const name of ['min_stars', 'labels', 'limit']) {
+    form.elements[name].addEventListener('input', () => {
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(applyFilters, 450);
+    });
+  }
+
+  sortSel.addEventListener('change', () => { sortSel.blur(); bookmarksMode = false; syncUrl(); load(); });
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') searchInput.blur(); });
   searchInput.addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { bookmarksMode = false; syncUrl(); load(); }, 350);
