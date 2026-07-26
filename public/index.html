@@ -104,6 +104,17 @@
   .count { font-size: 14.5px; }
   .count b { font-weight: 700; }
   .count .sortedby { color: var(--muted); margin-left: 6px; }
+  /* refetch indicator: the stale list stays readable, just visibly stale.
+     Both cues wait ~180ms so a fast response never flashes them. */
+  .spin {
+    display: none; width: 12px; height: 12px; margin-left: 8px; vertical-align: -1px;
+    border: 2px solid var(--hair); border-top-color: var(--accent); border-radius: 50%;
+  }
+  body.loading .spin { display: inline-block; animation: rot .7s linear infinite, fade-in .15s both .18s; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  @keyframes fade-in { from { opacity: 0; } }
+  #list { transition: opacity .12s ease; }
+  body.loading #list { opacity: .55; transition: opacity .15s ease .18s; }
   .tools { margin-left: auto; display: flex; gap: 10px; align-items: center; }
   .tools select {
     background: var(--bg); color: var(--ink); border: 1px solid var(--input-border);
@@ -245,6 +256,8 @@
     font-size: 13.5px; cursor: pointer;
   }
   .more:hover { color: var(--accent); border-color: var(--accent); }
+  .more:disabled { opacity: .6; cursor: default; }
+  .more:disabled:hover { color: var(--muted); border-color: var(--input-border); }
   /* author display:block beats the hidden attribute's UA rule; restore it */
   .more[hidden] { display: none; }
   /* "new issues" pill: floats under the top bar so it's reachable however
@@ -380,7 +393,7 @@
   <main class="main">
     <div class="list-head">
       <button class="filters-toggle" id="filters-toggle">☰ Filters</button>
-      <span class="count"><b id="count">…</b><span class="sortedby" id="sortedby">· sorted by newest</span></span>
+      <span class="count"><b id="count">…</b><span class="sortedby" id="sortedby">· sorted by newest</span><span class="spin" aria-hidden="true"></span></span>
       <a class="bm-exit" id="bm-exit" href="#" hidden>← back to the feed</a>
       <div class="tools">
         <select id="sort" title="sort order">
@@ -724,6 +737,8 @@
     document.getElementById('bm-exit').hidden = true;
     if (!append) offset = 0;
     if (firstLoad) { showSkeletons(); firstLoad = false; }
+    else if (append) { moreBtn.disabled = true; moreBtn.textContent = 'Loading…'; }
+    else document.body.classList.add('loading'); // stale-while-revalidate: dim, don't blank
     try {
       const p = formParams();
       if (offset > 0) p.set('offset', String(offset));
@@ -761,6 +776,10 @@
       hideNewPill();
       schedule(load, ERROR_RETRY_MS); // always retry the feed itself after a failure
       return;
+    } finally {
+      document.body.classList.remove('loading');
+      moreBtn.disabled = false;
+      moreBtn.textContent = 'Load more';
     }
     markActivePresets();
     // Fetch status only after the list and its pagination UI are fully
