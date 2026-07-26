@@ -23,6 +23,7 @@ query FetchIssues($q: String!, $cursor: String) {
         updatedAt
         author { login }
         comments { totalCount }
+        closedByPullRequestsReferences(first: 1) { totalCount }
         labels(first: 15) { nodes { name } }
         repository {
           nameWithOwner
@@ -134,6 +135,7 @@ query VerifyIssues($ids: [ID!]!) {
       state
       assignees(first: 1) { totalCount }
       comments { totalCount }
+      closedByPullRequestsReferences(first: 1) { totalCount }
     }
   }
 }
@@ -146,6 +148,7 @@ interface VerifyPage {
     state?: string;
     assignees?: { totalCount: number };
     comments?: { totalCount: number };
+    closedByPullRequestsReferences?: { totalCount: number };
   } | null>;
 }
 
@@ -153,6 +156,8 @@ export interface IssueStatus {
   isOpen: boolean;
   isAssigned: boolean;
   comments: number;
+  /** Open PRs that declare they will close this issue (closing keyword or manual link). */
+  linkedPrs: number;
 }
 
 /**
@@ -185,11 +190,14 @@ export async function verifyIssueStates(
           isOpen: node.state === 'OPEN',
           isAssigned: (node.assignees?.totalCount ?? 0) > 0,
           comments: node.comments?.totalCount ?? 0,
+          linkedPrs: node.closedByPullRequestsReferences?.totalCount ?? 0,
         });
       }
     }
     for (const id of batch) {
-      if (!seen.has(id)) statuses.set(id, { isOpen: false, isAssigned: false, comments: 0 });
+      if (!seen.has(id)) {
+        statuses.set(id, { isOpen: false, isAssigned: false, comments: 0, linkedPrs: 0 });
+      }
     }
 
     if (i + 100 < ids.length) await sleep(INTER_PAGE_DELAY_MS);

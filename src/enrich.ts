@@ -4,9 +4,10 @@ import { applyVerification, cleanupIssues, selectIssuesToVerify } from './db.js'
 import { verifyIssueStates } from './github.js';
 
 /**
- * Phase 3 enrichment: re-check open/assigned status of stored claimable
- * issues, least-recently-verified first. Issues found closed, assigned, or
- * deleted are flagged (not deleted) so they drop out of the feed.
+ * Phase 3 enrichment: re-check open/assigned/PR-linked status of stored
+ * claimable issues, least-recently-verified first. Issues found closed,
+ * assigned, PR-linked, or deleted are flagged (not deleted) so they drop out
+ * of the feed; the retention pass below hard-deletes them.
  */
 export async function enrichOnce(pool: pg.Pool, config: Config): Promise<void> {
   const ids = await selectIssuesToVerify(pool, config.enrichMaxIssues);
@@ -21,6 +22,7 @@ export async function enrichOnce(pool: pg.Pool, config: Config): Promise<void> {
       isOpen: s.isOpen,
       isAssigned: s.isAssigned,
       comments: s.comments,
+      linkedPrs: s.linkedPrs,
     }));
     const { stillClaimable, retired } = await applyVerification(pool, updates);
 
@@ -33,7 +35,7 @@ export async function enrichOnce(pool: pg.Pool, config: Config): Promise<void> {
   // Retention runs with every enrich pass (every 6h on the cron).
   const { retired: deletedRetired, aged } = await cleanupIssues(pool, config.retentionDays);
   console.log(
-    `retention: deleted ${deletedRetired} retired (closed/assigned) and ` +
+    `retention: deleted ${deletedRetired} retired (closed/assigned/PR-linked) and ` +
       `${aged} older than ${config.retentionDays} day(s)`
   );
 }

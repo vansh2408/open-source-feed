@@ -8,6 +8,8 @@ export interface IssueNode {
   updatedAt: string;
   author: { login: string } | null;
   comments: { totalCount: number };
+  /** Open PRs that declare they will close this issue; taken even if unassigned. */
+  closedByPullRequestsReferences: { totalCount: number } | null;
   labels: { nodes: Array<{ name: string } | null> | null };
   repository: {
     nameWithOwner: string;

@@ -15,6 +15,9 @@ export function keepIssue(issue: IssueNode, config: Config): boolean {
   const repo = issue.repository;
   if (repo.stargazerCount < config.starsMin) return false;
   if (repo.isArchived || repo.isDisabled) return false;
+  // An open PR already set to close this issue means it's taken, even while
+  // open+unassigned. PRs that appear later are caught by enrichment instead.
+  if ((issue.closedByPullRequestsReferences?.totalCount ?? 0) > 0) return false;
 
   if (config.labelFilter.length > 0) {
     const names = labelNames(issue).map((n) => n.toLowerCase());

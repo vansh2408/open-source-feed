@@ -120,14 +120,15 @@
     <div class="step">
       <span class="when">every 5 min</span>
       <span class="what"><b>Fetch.</b> New issues are discovered within minutes of being
-      opened: open, unassigned, in JavaScript, TypeScript, Python, Go, Rust or Java
-      repositories with <b>100★+</b>.</span>
+      opened: open, unassigned, with no pull request already linked to close them, in
+      JavaScript, TypeScript, Python, Go, Rust or Java repositories with <b>100★+</b>.</span>
     </div>
     <div class="step">
       <span class="when">every 6 h</span>
       <span class="what"><b>Re-verify.</b> Issues get claimed or closed after we find them,
       so every listed issue is re-checked against GitHub, and anything no longer open and
-      unassigned silently drops out. Comment counts are refreshed at the same time.</span>
+      unassigned — or that now has an open pull request set to close it ("fixes #123") —
+      silently drops out. Comment counts are refreshed at the same time.</span>
     </div>
     <div class="step">
       <span class="when">after 5 days</span>
@@ -137,8 +138,8 @@
   </div>
 
   <h2>Reading the feed</h2>
-  <p>Everything in the list is open and unassigned as of the last verification pass.
-  Two signals worth watching:</p>
+  <p>Everything in the list is open, unassigned, and not already being fixed by a linked
+  pull request, as of the last verification pass. Two signals worth watching:</p>
   <p><strong>💬 0 comments</strong> means nobody has even started discussing the issue.
   Those are the truly uncontested ones. <strong>NEW</strong> marks issues created since your
   previous visit. Bookmark anything interesting with the flag icon (saved in your browser);

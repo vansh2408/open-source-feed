@@ -118,7 +118,9 @@ export async function cleanupIssues(
   pool: pg.Pool,
   retentionDays: number
 ): Promise<{ retired: number; aged: number }> {
-  const retired = await pool.query(`DELETE FROM issues WHERE NOT is_open OR is_assigned`);
+  const retired = await pool.query(
+    `DELETE FROM issues WHERE NOT is_open OR is_assigned OR linked_prs > 0`
+  );
   const aged = await pool.query(
     `DELETE FROM issues WHERE created_at < now() - make_interval(days => $1)`,
     [retentionDays]
@@ -138,7 +140,7 @@ export async function listLanguages(pool: pg.Pool): Promise<string[]> {
 export async function selectIssuesToVerify(pool: pg.Pool, limit: number): Promise<string[]> {
   const { rows } = await pool.query<{ id: string }>(
     `SELECT id FROM issues
-     WHERE is_open AND NOT is_assigned
+     WHERE is_open AND NOT is_assigned AND linked_prs = 0
      ORDER BY last_verified_at ASC NULLS FIRST, created_at DESC
      LIMIT $1`,
     [limit]
@@ -151,6 +153,7 @@ export interface VerificationUpdate {
   isOpen: boolean;
   isAssigned: boolean;
   comments: number;
+  linkedPrs: number;
 }
 
 export async function applyVerification(
@@ -164,11 +167,12 @@ export async function applyVerification(
     for (const u of updates) {
       await client.query(
         `UPDATE issues
-         SET is_open = $2, is_assigned = $3, comments = $4, last_verified_at = now()
+         SET is_open = $2, is_assigned = $3, comments = $4, linked_prs = $5,
+             last_verified_at = now()
          WHERE id = $1`,
-        [u.id, u.isOpen, u.isAssigned, u.comments]
+        [u.id, u.isOpen, u.isAssigned, u.comments, u.linkedPrs]
       );
-      if (u.isOpen && !u.isAssigned) stillClaimable++;
+      if (u.isOpen && !u.isAssigned && u.linkedPrs === 0) stillClaimable++;
       else retired++;
     }
   } finally {
@@ -204,7 +208,7 @@ export interface FeedQuery {
 
 export async function readFeed(pool: pg.Pool, query: FeedQuery): Promise<FeedRow[]> {
   // The feed only ever shows still-claimable issues (enrichment flips these).
-  const where: string[] = ['is_open', 'NOT is_assigned'];
+  const where: string[] = ['is_open', 'NOT is_assigned', 'linked_prs = 0'];
   const params: unknown[] = [];
 
   if (query.minStars !== undefined) {

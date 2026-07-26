@@ -14,6 +14,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: npm ci
+      # Same reasoning as enrich.yml: never run fresh code against a stale schema.
+      - run: npm run migrate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }} # loadConfig requires it even for migrate
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: npm run poll:once
         env:
           # Custom PAT secret, NOT the auto-injected GITHUB_TOKEN
