@@ -6,13 +6,18 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { Config } from './config.js';
-import { listLanguages, readFeed, type FeedQuery } from './db.js';
+import { listLanguages, readFeed, type FeedQuery, type FeedRow } from './db.js';
 import { pollOnce } from './poller.js';
+import { llmsTxt, renderAppPage, robotsTxt, sitemapXml } from './seo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(__dirname, '..', 'public', 'index.html');
 const ABOUT_HTML = path.join(__dirname, '..', 'public', 'about.html');
+const GUIDE_HTML = path.join(__dirname, '..', 'public', 'guide.html');
 const OG_PNG = path.join(__dirname, '..', 'public', 'og.png');
+
+/** Issues server-rendered into the HTML shell for crawlers (JS re-renders). */
+const SSR_ISSUE_COUNT = 30;
 
 const MAX_PAGE_SIZE = 200;
 // Star/offset params compare against Postgres integer columns; anything
@@ -84,14 +89,58 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     allowList: (req) => req.url === '/health', // Render's own health checks
   });
 
+  // The app shell is served with the first page of issues server-rendered
+  // into it: crawlers (and AI bots, which mostly don't run JS) see real
+  // content; the client script re-renders over it on load. On any SSR
+  // failure the plain shell is served, never an error page.
+  const ssrIssues = async (language?: string): Promise<FeedRow[]> => {
+    try {
+      return await readFeed(pool, { limit: SSR_ISSUE_COUNT, ...(language ? { language } : {}) });
+    } catch (err) {
+      console.error('SSR feed query failed:', err instanceof Error ? err.message : err);
+      return [];
+    }
+  };
+
   app.get('/', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
-    return readFile(INDEX_HTML, 'utf8');
+    const template = await readFile(INDEX_HTML, 'utf8');
+    return renderAppPage(template, await ssrIssues());
+  });
+
+  // Language landing pages (/python, /rust, ...): same app, preset filter,
+  // own title/description/canonical. Only configured languages resolve.
+  app.get('/:lang', async (req, reply) => {
+    const { lang } = req.params as { lang: string };
+    if (!config.languages.includes(lang)) return reply.callNotFound();
+    reply.type('text/html; charset=utf-8');
+    const template = await readFile(INDEX_HTML, 'utf8');
+    return renderAppPage(template, await ssrIssues(lang), { lang });
   });
 
   app.get('/about', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     return readFile(ABOUT_HTML, 'utf8');
+  });
+
+  app.get('/guide', async (_req, reply) => {
+    reply.type('text/html; charset=utf-8');
+    return readFile(GUIDE_HTML, 'utf8');
+  });
+
+  app.get('/robots.txt', async (_req, reply) => {
+    reply.type('text/plain; charset=utf-8').header('cache-control', 'public, max-age=3600');
+    return robotsTxt();
+  });
+
+  app.get('/sitemap.xml', async (_req, reply) => {
+    reply.type('application/xml; charset=utf-8').header('cache-control', 'public, max-age=3600');
+    return sitemapXml(config.languages);
+  });
+
+  app.get('/llms.txt', async (_req, reply) => {
+    reply.type('text/plain; charset=utf-8').header('cache-control', 'public, max-age=3600');
+    return llmsTxt(config.languages);
   });
 
   // Social-preview card (og:image target for link unfurls).

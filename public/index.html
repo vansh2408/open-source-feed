@@ -284,6 +284,8 @@
   .bm-exit { font-size: 13.5px; font-weight: 500; color: var(--accent); text-decoration: none; white-space: nowrap; }
   .bm-exit:hover { text-decoration: underline; }
   .empty, .error { padding: 56px 24px; text-align: center; font-size: 14px; color: var(--muted); }
+  /* intro line on server-rendered language landing pages */
+  .page-intro { margin: 14px 28px 0; font-size: 13px; color: var(--muted); }
   .error { color: #dc2626; }
   footer { padding: 8px 28px 36px; font-size: 12.5px; color: var(--faint); }
   footer a { color: var(--faint); }
@@ -420,7 +422,16 @@
     <footer>
       fresh, open, unassigned issues from 100★+ repos · updates every minute ·
       <a id="rss-footer" href="/feed.xml">subscribe via rss/atom</a> ·
+      <a href="/guide">guide</a> ·
       <a href="/about">about</a>
+      <br>
+      browse by language:
+      <a href="/javascript">JavaScript</a> ·
+      <a href="/typescript">TypeScript</a> ·
+      <a href="/python">Python</a> ·
+      <a href="/go">Go</a> ·
+      <a href="/rust">Rust</a> ·
+      <a href="/java">Java</a>
     </footer>
   </main>
 </div>
@@ -637,19 +648,38 @@
     return p;
   }
 
+  // Language landing pages (/python etc.) preset the filter server-side.
+  const presetLanguage = document.documentElement.dataset.presetLanguage || '';
+
+  // The language <select> starts with only "all"; its real options arrive
+  // async from /languages. Setting .value before the option exists silently
+  // fails, so make sure the option is there first (loadLanguages dedupes).
+  function setLanguage(value) {
+    const sel = form.elements['language'];
+    if (value && ![...sel.options].some((o) => o.value === value)) {
+      sel.add(new Option(value, value));
+    }
+    sel.value = value;
+  }
+
   function syncUrl() {
-    const q = formParams().toString();
-    history.replaceState(null, '', q ? '?' + q : location.pathname);
-    const rss = '/feed.xml' + (q ? '?' + q : '');
+    const p = formParams();
+    const rss = '/feed.xml' + (p.toString() ? '?' + p : '');
     document.getElementById('rss-link').href = rss;
     document.getElementById('rss-footer').href = rss;
+    // On /python the preset language is implied by the path; only a
+    // *different* language belongs in the query string.
+    if (presetLanguage && p.get('language') === presetLanguage) p.delete('language');
+    const q = p.toString();
+    history.replaceState(null, '', q ? '?' + q : location.pathname);
   }
 
   function restoreFromUrl() {
     const p = new URLSearchParams(location.search);
-    for (const k of ['language', 'min_stars', 'max_stars', 'labels', 'limit']) {
+    for (const k of ['min_stars', 'max_stars', 'labels', 'limit']) {
       if (p.has(k)) form.elements[k].value = p.get(k);
     }
+    setLanguage(p.get('language') || presetLanguage);
     // Normalize a shared link's sub-floor minimum here, so a later focus/blur
     // on the field doesn't surprise-rewrite it and reload mid-session.
     const ms = form.elements['min_stars'];
@@ -736,7 +766,9 @@
     if (bookmarksMode) { renderBookmarks(); return; }
     document.getElementById('bm-exit').hidden = true;
     if (!append) offset = 0;
-    if (firstLoad) { showSkeletons(); firstLoad = false; }
+    // Server-rendered issues may already be in the list; keep them visible
+    // instead of flashing skeletons over real content.
+    if (firstLoad) { if (!list.children.length) showSkeletons(); firstLoad = false; }
     else if (append) { moreBtn.disabled = true; moreBtn.textContent = 'Loading…'; }
     else document.body.classList.add('loading'); // stale-while-revalidate: dim, don't blank
     try {
@@ -792,14 +824,14 @@
       const res = await fetch('/languages');
       const data = await res.json();
       const select = document.getElementById('language');
-      const wanted = new URLSearchParams(location.search).get('language');
       for (const lang of data.languages) {
+        // setLanguage may have created this option already; don't duplicate.
+        if ([...select.options].some((o) => o.value === lang)) continue;
         const opt = document.createElement('option');
         opt.value = lang;
         opt.textContent = lang;
         select.appendChild(opt);
       }
-      if (wanted) select.value = wanted;
     } catch { /* dropdown just stays at "all" */ }
   }
 

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to find open source issues that are actually available · open source feed</title>
+<meta name="description" content="A practical guide to finding GitHub issues to contribute to: why most good-first-issue lists are dead leads, what makes an issue claimable, and how to claim one before anyone else.">
+<meta property="og:title" content="How to find open source issues that are actually available">
+<meta property="og:description" content="Why most good-first-issue lists are dead leads, what makes an issue claimable, and how to claim one before anyone else.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://opensourcefeed.dev/guide">
+<meta property="og:image" content="https://opensourcefeed.dev/og.png">
+<link rel="canonical" href="https://opensourcefeed.dev/guide">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%232563eb%22/><text x=%2250%22 y=%2266%22 font-size=%2244%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>osf</text></svg>">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"How to find open source issues that are actually available","description":"Why most good-first-issue lists are dead leads, what makes an issue claimable, and how to claim one before anyone else.","url":"https://opensourcefeed.dev/guide","publisher":{"@type":"Organization","name":"open source feed","url":"https://opensourcefeed.dev/"}}</script>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #111827; --muted: #6b7280; --faint: #9ca3af;
+    --hair: #e5e7eb; --hover-bg: #f9fafb; --input-border: #d1d5db;
+    --accent: #2563eb; --green: #16a34a;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --ink: #e6edf3; --muted: #8b949e; --faint: #6e7681;
+      --hair: #21262d; --hover-bg: #161b22; --input-border: #30363d;
+      --accent: #3b82f6; --green: #3fb950;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.65 var(--sans); }
+
+  .topbar { position: sticky; top: 0; z-index: 30; background: var(--bg); border-bottom: 1px solid var(--hair); }
+  .topbar-inner { padding: 15px 24px; display: flex; align-items: center; gap: 20px; }
+  .wordmark { font-size: 19px; font-weight: 800; letter-spacing: -.4px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .wordmark em { font-style: normal; color: var(--accent); }
+  .nav-link { margin-left: auto; font-size: 13.5px; color: var(--muted); text-decoration: none; font-weight: 500; }
+  .nav-link:hover { color: var(--accent); }
+
+  article { max-width: 660px; margin: 0 auto; padding: 44px 20px 72px; }
+  h1 { font-size: 27px; letter-spacing: -.5px; line-height: 1.25; margin: 0 0 10px; }
+  .lede { font-size: 16.5px; color: var(--muted); margin: 0 0 40px; }
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--faint); margin: 44px 0 14px; padding-top: 26px; border-top: 1px solid var(--hair);
+  }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  strong { font-weight: 650; }
+  ul.checks { margin: 0 0 14px; padding-left: 22px; color: var(--muted); }
+  ul.checks li { margin-bottom: 8px; }
+  ul.checks b { color: var(--ink); font-weight: 600; }
+
+  .langs { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .langs a {
+    border: 1px solid var(--input-border); border-radius: 8px; padding: 8px 14px;
+    font-size: 13.5px; font-weight: 500; color: var(--ink); background: var(--bg);
+  }
+  .langs a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+
+  .cta { margin-top: 40px; }
+  .cta a {
+    display: inline-block; background: var(--accent); color: #fff; font-weight: 600;
+    padding: 11px 22px; border-radius: 9px; font-size: 14.5px;
+  }
+  .cta a:hover { text-decoration: none; filter: brightness(1.08); }
+  footer { max-width: 660px; margin: 0 auto; padding: 0 20px 40px; font-size: 12.5px; color: var(--faint); }
+</style>
+<script type="text/javascript">
+  (function(c,l,a,r,i,t,y){
+      c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+      t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+      y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+  })(window, document, "clarity", "script", "xov5tfk3v9");
+</script>
+<script data-goatcounter="https://vansh.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="wordmark" href="/">open source <em>feed</em></a>
+    <a class="nav-link" href="/">← back to the feed</a>
+  </div>
+</div>
+
+<article>
+  <h1>How to find open source issues that are actually available</h1>
+  <p class="lede">Most advice about contributing to open source points you at curated lists of
+  "good first issues". Most of those issues are already taken. This is a short, practical guide
+  to finding GitHub issues you can genuinely claim, written for first-time and early
+  contributors.</p>
+
+  <h2>Why most issue lists are dead leads</h2>
+  <p>When an issue reaches a curated list or a blog post, it has usually been visible for days
+  or weeks. In a popular repository that is an eternity. By the time you read it, one of three
+  things has almost always happened:</p>
+  <ul class="checks">
+    <li><b>Someone was assigned.</b> The maintainer gave it to a contributor, but the list you
+    found it on never updated.</li>
+    <li><b>A pull request is already open.</b> The issue still looks free: it is open and
+    unassigned. But someone has a PR up that says "fixes #123", and GitHub has quietly linked
+    it. You only discover this after reading the whole thread.</li>
+    <li><b>It went stale.</b> The issue was fixed in passing, superseded, or the project moved
+    on, and nobody closed it.</li>
+  </ul>
+  <p>Beginners burn their motivation on exactly these dead leads: you pick an issue, set up the
+  project, start writing code, and then find the comment saying someone else is on it. The
+  problem is not your skill. The problem is that you were searching where everyone else already
+  searched, days later.</p>
+
+  <h2>What "available" actually means</h2>
+  <p>Before investing time in any GitHub issue, check four things:</p>
+  <ul class="checks">
+    <li><b>Open.</b> Obvious, but stale lists routinely link to closed issues.</li>
+    <li><b>Unassigned.</b> If GitHub shows an assignee, it is taken, whatever the thread says.</li>
+    <li><b>No linked pull request.</b> Look for "linked a pull request that will close this
+    issue" in the timeline, and for the Development section in the sidebar. An open PR with a
+    closing reference means the issue is claimed in practice.</li>
+    <li><b>Fresh.</b> The younger the issue, the higher the odds nobody is quietly working on
+    it. An issue opened an hour ago in an active repo is a real opportunity; the same issue
+    three weeks later usually is not.</li>
+  </ul>
+  <p><a href="/">open source feed</a> automates all four checks. It discovers new issues in
+  popular repositories (100 stars and up) within minutes of being opened, keeps only the open,
+  unassigned ones with no linked PR, re-verifies them against GitHub on a schedule, and expires
+  everything after five days. If an issue is in the feed, it was claimable as of the last
+  verification pass.</p>
+
+  <h2>A workflow that works</h2>
+  <p><strong>1. Search fresh, not curated.</strong> Speed matters more than curation. Watch new
+  issues as they appear instead of reading week-old lists. That is the entire reason this feed
+  exists; the <a href="/feed.xml">RSS/Atom feed</a> lets your reader do the watching.</p>
+  <p><strong>2. Use the zero-comment signal.</strong> An issue with no comments has no
+  discussion, no "can I take this?", no maintainer promises to anyone. Those are the truly
+  uncontested ones, and the feed marks them.</p>
+  <p><strong>3. Filter to your strengths.</strong> Start with a language you know and labels
+  that match your level: "good first issue" and "documentation" for a first contribution,
+  "bug" or "help wanted" once you are comfortable. Star filters let you choose between huge
+  projects (more process, more review) and smaller active ones (faster merges).</p>
+  <p><strong>4. Claim it properly.</strong> Comment on the issue first: one line saying you
+  would like to work on it and how you plan to approach it. Read the project's CONTRIBUTING.md
+  before writing code. Keep your first pull request small and focused; a tidy 20-line fix
+  merges faster than an ambitious rewrite, and merged is what counts.</p>
+  <p><strong>5. Move on quickly when it is gone.</strong> If a maintainer says it is taken, or
+  a PR appears, drop it without ceremony and pick the next one. Fresh issues appear all day,
+  every day. The feed's "not interested" button exists for exactly this.</p>
+
+  <h2>Start with your language</h2>
+  <p>Each page below shows only fresh, claimable issues in that language, updated every few
+  minutes:</p>
+  <div class="langs">
+    <a href="/javascript">JavaScript</a>
+    <a href="/typescript">TypeScript</a>
+    <a href="/python">Python</a>
+    <a href="/go">Go</a>
+    <a href="/rust">Rust</a>
+    <a href="/java">Java</a>
+  </div>
+  <p>Or read <a href="/about">how the pipeline works</a> if you want the details behind the
+  feed: polling cadence, verification, and why issues expire.</p>
+
+  <div class="cta"><a href="/">Browse claimable issues now →</a></div>
+</article>
+
+<footer>
+  fresh, open, unassigned issues from 100★+ repos ·
+  <a href="/">feed</a> · <a href="/about">about</a> · <a href="/feed.xml">rss/atom</a>
+</footer>
+</body>
+</html>
