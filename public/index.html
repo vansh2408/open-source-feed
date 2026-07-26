@@ -210,6 +210,27 @@
   .more:hover { color: var(--accent); border-color: var(--accent); }
   /* author display:block beats the hidden attribute's UA rule; restore it */
   .more[hidden] { display: none; }
+  /* "new issues" pill: floats under the top bar so it's reachable however
+     deep the reader has scrolled. The feed itself never moves under them. */
+  .new-issues {
+    position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 40;
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--accent); color: var(--accent-ink); border: 0; cursor: pointer;
+    border-radius: 999px; padding: 8px 17px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .22);
+    animation: drop-in .22s ease;
+  }
+  .new-issues:hover { filter: brightness(1.08); }
+  .new-issues[hidden] { display: none; }
+  .new-issues svg {
+    width: 13px; height: 13px; flex-shrink: 0;
+    fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  @keyframes drop-in { from { opacity: 0; transform: translate(-50%, -10px); } }
+  @media (min-width: 841px) {
+    /* center over the list column, not the viewport (sidebar is 280px wide) */
+    .new-issues { left: calc(50% + 140px); }
+  }
   .bm-exit { font-size: 13.5px; font-weight: 500; color: var(--accent); text-decoration: none; white-space: nowrap; }
   .bm-exit:hover { text-decoration: underline; }
   .empty, .error { padding: 56px 24px; text-align: center; font-size: 14px; color: var(--muted); }
@@ -334,6 +355,9 @@
       </div>
     </div>
 
+    <button class="new-issues" id="new-issues" hidden title="show them (reloads the list)">
+      <svg viewBox="0 0 16 16"><path d="M8 12.5v-9M3.75 7.75 8 3.5l4.25 4.25"/></svg><span></span>
+    </button>
     <ul id="list"></ul>
     <div id="message" class="empty" hidden></div>
     <button class="more" id="more" hidden>Load more</button>
@@ -426,12 +450,14 @@
   }
   setInterval(tickSync, 1000);
 
-  // ---- schedule-aware refresh: between polls the feed cannot change, so
-  // refresh just after the next poll should land instead of on a fixed timer.
+  // ---- schedule-aware background check: between polls the feed cannot
+  // change, so look again just after the next poll should land. The check
+  // NEVER rewrites the list — a reader scanning the feed keeps their place;
+  // it only reveals a "N new issues" pill, and the list reloads on click.
   const ERROR_RETRY_MS = 60_000;  // failed load: plain fixed retry, like the old timer
   const CATCHUP_MS = 60_000;      // fresh data may still be mid-pass on the server
   const SYNC_BUFFER_MS = 45_000;  // a poll pass takes time to finish writing
-  function nextRefreshDelay() {
+  function nextCheckDelay() {
     if (!syncDeadline) return ERROR_RETRY_MS;
     // A pass stamps last_poll_at while it is still writing; if the data is
     // very fresh, look again soon so a slow pass's rows aren't hidden for a
@@ -440,15 +466,42 @@
     const wait = syncDeadline + SYNC_BUFFER_MS - Date.now();
     // Clamp: the floor keeps overdue polls retrying, the ceiling bounds the
     // damage of any scheduling mistake. Jitter so many open tabs don't all
-    // refresh in the same instant.
+    // check in the same instant.
     return Math.min(Math.max(wait, 30_000), pollIntervalSec * 1000 + 60_000) + Math.random() * 5000;
   }
-  function scheduleRefresh(delayMs) {
+  function schedule(fn, delayMs) {
     clearTimeout(timer);
-    if (offset !== 0 || bookmarksMode) return; // "Load more" pages and bookmarks are never auto-refreshed
-    timer = setTimeout(() => {
-      if (offset === 0 && !bookmarksMode) load(); // re-check: state may have changed while waiting
-    }, delayMs);
+    timer = setTimeout(fn, delayMs);
+  }
+
+  // Every issue id currently on screen (page one plus any "Load more" pages),
+  // so a background fetch can tell what the reader hasn't seen yet.
+  let shownIds = new Set();
+  // Bumped whenever the list is rebuilt: a check that was already in flight
+  // compares against a list that no longer exists, so it discards itself.
+  let feedGen = 0;
+  const newBtn = document.getElementById('new-issues');
+  function hideNewPill() { newBtn.hidden = true; }
+
+  async function checkForNew() {
+    if (bookmarksMode) return;
+    const gen = feedGen;
+    try {
+      const res = await fetch('/issues?' + formParams());
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (gen !== feedGen || bookmarksMode) return;
+      const fresh = data.issues.filter((i) => !shownIds.has(i.id)).length;
+      if (fresh > 0) {
+        newBtn.querySelector('span').textContent = fresh + ' new issue' + (fresh === 1 ? '' : 's');
+        newBtn.hidden = false;
+      } else {
+        // The unseen ones may have been claimed since the last check; a pill
+        // promising issues that a reload wouldn't show reads as broken.
+        hideNewPill();
+      }
+    } catch { /* silent background check; the reschedule below retries */ }
+    loadStatus().then(() => schedule(checkForNew, nextCheckDelay()));
   }
 
   // "New since your last visit": baseline is when you PREVIOUSLY opened the
@@ -579,6 +632,7 @@
     sortedbyEl.textContent = '';
     document.getElementById('bm-exit').hidden = false;
     clearTimeout(timer);
+    hideNewPill();
     markActivePresets();
   }
 
@@ -595,8 +649,15 @@
       const data = await res.json();
       data.issues.forEach((i) => renderedIssues.set(i.id, i));
       const html = data.issues.map(render).join('');
-      if (append) list.insertAdjacentHTML('beforeend', html);
-      else list.innerHTML = html;
+      if (append) {
+        list.insertAdjacentHTML('beforeend', html);
+        data.issues.forEach((i) => shownIds.add(i.id));
+      } else {
+        list.innerHTML = html;
+        shownIds = new Set(data.issues.map((i) => i.id));
+        feedGen++;
+        hideNewPill();
+      }
       const pageSize = Number(form.elements['limit'].value) || 50;
       moreBtn.hidden = data.issues.length < pageSize;
       message.hidden = list.children.length > 0;
@@ -611,13 +672,14 @@
       message.className = 'error';
       message.textContent = 'Failed to load: ' + err.message;
       markActivePresets();
-      scheduleRefresh(ERROR_RETRY_MS); // always retry the feed itself after a failure
+      hideNewPill();
+      schedule(load, ERROR_RETRY_MS); // always retry the feed itself after a failure
       return;
     }
     markActivePresets();
     // Fetch status only after the list and its pagination UI are fully
     // rendered (no suspension between DOM writes), then schedule from it.
-    loadStatus().then(() => scheduleRefresh(nextRefreshDelay()));
+    loadStatus().then(() => schedule(checkForNew, nextCheckDelay()));
   }
 
   async function loadLanguages() {
@@ -699,6 +761,12 @@
   moreBtn.addEventListener('click', () => {
     offset += Number(form.elements['limit'].value) || 50;
     load({ append: true });
+  });
+
+  newBtn.addEventListener('click', () => {
+    hideNewPill();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    load();
   });
 
   form.addEventListener('submit', (e) => {
