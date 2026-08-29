@@ -222,9 +222,17 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   app.post('/internal/poll', triggerPoll);
   app.get('/internal/poll', triggerPoll);
 
-  app.get('/languages', async (_req, reply) => {
-    reply.header('cache-control', 'public, max-age=300');
-    return { languages: store.languages() };
+  // The configured set, not just languages that currently hold rows. A poll
+  // pass fills one language at a time, so a page loaded mid-pass used to build
+  // its dropdown from whichever had landed so far and keep it for the life of
+  // the page. These are also exactly the languages /:lang landing pages
+  // resolve for, and what sitemap.xml and llms.txt advertise.
+  //
+  // No cache-control either: the response is a few dozen bytes and costs no
+  // database time, and caching it is what turned a one-minute race into a
+  // five-minute stale dropdown that survived a reload.
+  app.get('/languages', async () => {
+    return { languages: [...config.languages].sort() };
   });
 
   // Poller heartbeat: drives the "next sync" countdown in the UI.

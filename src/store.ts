@@ -313,13 +313,6 @@ export class FeedStore implements PollSink {
     return matched.slice(offset, ceiling).map(toFeedRow);
   }
 
-  /** Languages that actually have rows, for the frontend dropdown. */
-  languages(): string[] {
-    const seen = new Set<string>();
-    for (const row of this.issues.values()) seen.add(row.language);
-    return [...seen].sort();
-  }
-
   status(): {
     lastPollAt: Date | null;
     pollIntervalSeconds: number;
