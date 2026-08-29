@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "tsx src/index.ts migrate && tsx src/index.ts api",
+    "start": "tsx src/index.ts serve",
     "migrate": "tsx src/index.ts migrate",
     "poll:once": "tsx src/index.ts poll:once",
     "poll:watch": "tsx src/index.ts poll:watch",

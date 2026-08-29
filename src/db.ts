@@ -13,6 +13,10 @@ export function createPool(databaseUrl: string): pg.Pool {
     connectionString: databaseUrl,
     max: 5,
     keepAlive: true,
+    // Neon bills wall-clock time the compute is awake and only autosuspends
+    // once it goes quiet, so idle clients must drain promptly rather than
+    // linger for the node-postgres default.
+    idleTimeoutMillis: 5_000,
     ...(isLocal ? {} : { ssl: true }),
   });
   // Neon's pooler drops idle connections; without a listener the resulting
@@ -35,6 +39,56 @@ export async function migrate(pool: pg.Pool): Promise<void> {
   const { rows } = await pool.query<{ now: Date }>('SELECT now() AS now');
   console.log(`Migrations applied. DB reachable, server time: ${rows[0]?.now.toISOString()}`);
 }
+
+/**
+ * Full persisted shape of an `issues` row, enrichment columns included. The
+ * in-memory store (store.ts) holds these; `FeedRow` below is the narrower
+ * projection sent to clients.
+ */
+export interface StoredIssue {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  repo_full_name: string;
+  repo_stars: number;
+  language: string;
+  labels: string[];
+  author_login: string | null;
+  comments: number;
+  created_at: Date;
+  updated_at: Date;
+  is_open: boolean;
+  is_assigned: boolean;
+  linked_prs: number;
+  last_verified_at: Date | null;
+}
+
+// Every write below goes through jsonb_to_recordset rather than a loop of
+// single-row statements: one round-trip per batch instead of one per issue.
+// Round-trips are what hold the Neon compute open, and `labels` being a
+// text[] rules out the usual unnest($1::text[], $2::int[], ...) trick.
+const ISSUE_COLS =
+  'id, number, title, url, repo_full_name, repo_stars, language, labels, ' +
+  'author_login, comments, created_at, updated_at, is_open, is_assigned, ' +
+  'linked_prs, last_verified_at';
+
+const ISSUE_RECORD =
+  'id text, number integer, title text, url text, repo_full_name text, ' +
+  'repo_stars integer, language text, labels text[], author_login text, ' +
+  'comments integer, created_at timestamptz, updated_at timestamptz, ' +
+  'is_open boolean, is_assigned boolean, linked_prs integer, ' +
+  'last_verified_at timestamptz';
+
+/** Columns the poller knows about; enrichment columns keep their defaults. */
+const POLL_COLS =
+  'id, number, title, url, repo_full_name, repo_stars, language, labels, ' +
+  'author_login, comments, created_at, updated_at';
+
+const POLL_RECORD =
+  'id text, number integer, title text, url text, repo_full_name text, ' +
+  'repo_stars integer, language text, labels text[], author_login text, ' +
+  'comments integer, created_at timestamptz, updated_at timestamptz';
 
 export async function getPollState(pool: pg.Pool, language: string): Promise<PollState | null> {
   const { rows } = await pool.query<PollState>(
@@ -67,45 +121,163 @@ export interface UpsertCounts {
   updated: number;
 }
 
-export async function upsertIssues(pool: pg.Pool, issues: IssueRow[]): Promise<UpsertCounts> {
-  const counts: UpsertCounts = { inserted: 0, updated: 0 };
-  if (issues.length === 0) return counts;
+/**
+ * Postgres aborts an ON CONFLICT DO UPDATE whose source rows collide
+ * ("cannot affect row a second time"), so a single duplicated id would fail a
+ * whole batch. The per-row loop this replaced silently let the last write win;
+ * keep that behaviour rather than making callers responsible for it.
+ */
+function dedupeById<T extends { id: string }>(rows: T[]): T[] {
+  if (rows.length < 2) return rows;
+  const byId = new Map<string, T>();
+  for (const row of rows) byId.set(row.id, row);
+  return byId.size === rows.length ? rows : [...byId.values()];
+}
 
+/** Batch upsert of freshly polled issues (one round-trip for the whole pass). */
+export async function upsertIssues(pool: pg.Pool, issues: IssueRow[]): Promise<UpsertCounts> {
+  if (issues.length === 0) return { inserted: 0, updated: 0 };
+
+  const { rows } = await pool.query<{ inserted: boolean }>(
+    `INSERT INTO issues (${POLL_COLS})
+     SELECT ${POLL_COLS} FROM jsonb_to_recordset($1::jsonb) AS x(${POLL_RECORD})
+     ON CONFLICT (id) DO UPDATE SET
+       repo_stars = EXCLUDED.repo_stars,
+       labels     = EXCLUDED.labels,
+       comments   = EXCLUDED.comments,
+       updated_at = EXCLUDED.updated_at
+     RETURNING (xmax = 0) AS inserted`,
+    [JSON.stringify(dedupeById(issues))]
+  );
+
+  const inserted = rows.filter((r) => r.inserted).length;
+  return { inserted, updated: rows.length - inserted };
+}
+
+export interface FlushBatch {
+  upserts: StoredIssue[];
+  deletes: string[];
+  /**
+   * `lastPollAt` is when the pass actually ran, not when it is being written.
+   * Buffering separates the two by up to DB_FLUSH_MINUTES, and stamping now()
+   * here would make the poller heartbeat (and the UI countdown it drives) read
+   * the flush cadence instead of the poll cadence after a restart.
+   */
+  watermarks: Array<{ language: string; watermark: Date; count: number; lastPollAt: Date }>;
+  retentionDays: number;
+}
+
+export interface FlushCounts {
+  upserted: number;
+  deleted: number;
+  aged: number;
+}
+
+/**
+ * The store's single write path: everything buffered since the last flush,
+ * committed in one transaction on one connection. This is the only thing that
+ * routinely wakes the Neon compute, so it is deliberately the only place the
+ * API process writes.
+ */
+export async function flushBatch(pool: pg.Pool, batch: FlushBatch): Promise<FlushCounts> {
   const client = await pool.connect();
   try {
-    for (const issue of issues) {
-      const { rows } = await client.query<{ inserted: boolean }>(
-        `INSERT INTO issues (id, number, title, url, repo_full_name, repo_stars,
-                             language, labels, author_login, comments, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    await client.query('BEGIN');
+
+    // Deletes first: an id can be retired and re-polled in the same window,
+    // and the insert below must win.
+    let deleted = 0;
+    if (batch.deletes.length > 0) {
+      const res = await client.query('DELETE FROM issues WHERE id = ANY($1::text[])', [
+        batch.deletes,
+      ]);
+      deleted = res.rowCount ?? 0;
+    }
+
+    let upserted = 0;
+    if (batch.upserts.length > 0) {
+      const res = await client.query(
+        `INSERT INTO issues (${ISSUE_COLS})
+         SELECT ${ISSUE_COLS} FROM jsonb_to_recordset($1::jsonb) AS x(${ISSUE_RECORD})
          ON CONFLICT (id) DO UPDATE SET
-           repo_stars = EXCLUDED.repo_stars,
-           labels     = EXCLUDED.labels,
-           comments   = EXCLUDED.comments,
-           updated_at = EXCLUDED.updated_at
-         RETURNING (xmax = 0) AS inserted`,
+           title            = EXCLUDED.title,
+           url              = EXCLUDED.url,
+           repo_stars       = EXCLUDED.repo_stars,
+           labels           = EXCLUDED.labels,
+           comments         = EXCLUDED.comments,
+           updated_at       = EXCLUDED.updated_at,
+           is_open          = EXCLUDED.is_open,
+           is_assigned      = EXCLUDED.is_assigned,
+           linked_prs       = EXCLUDED.linked_prs,
+           last_verified_at = EXCLUDED.last_verified_at`,
+        [JSON.stringify(dedupeById(batch.upserts))]
+      );
+      upserted = res.rowCount ?? 0;
+    }
+
+    if (batch.watermarks.length > 0) {
+      await client.query(
+        `INSERT INTO poll_state (language, watermark, last_poll_at, last_poll_count)
+         SELECT language, watermark, last_poll_at, count
+         FROM jsonb_to_recordset($1::jsonb)
+           AS x(language text, watermark timestamptz, last_poll_at timestamptz, count integer)
+         ON CONFLICT (language) DO UPDATE SET
+           watermark       = GREATEST(poll_state.watermark, EXCLUDED.watermark),
+           last_poll_at    = GREATEST(poll_state.last_poll_at, EXCLUDED.last_poll_at),
+           last_poll_count = EXCLUDED.last_poll_count`,
+        // jsonb_to_recordset matches columns by key name, so the payload has to
+        // speak snake_case; a camelCase key would silently arrive as NULL.
         [
-          issue.id,
-          issue.number,
-          issue.title,
-          issue.url,
-          issue.repo_full_name,
-          issue.repo_stars,
-          issue.language,
-          issue.labels,
-          issue.author_login,
-          issue.comments,
-          issue.created_at,
-          issue.updated_at,
+          JSON.stringify(
+            batch.watermarks.map((w) => ({
+              language: w.language,
+              watermark: w.watermark,
+              last_poll_at: w.lastPollAt,
+              count: w.count,
+            }))
+          ),
         ]
       );
-      if (rows[0]?.inserted) counts.inserted++;
-      else counts.updated++;
     }
+
+    // Retention rides along on a wake that already happened, so ageing rows
+    // out never costs a compute window of its own.
+    const agedRes = await client.query(
+      'DELETE FROM issues WHERE created_at < now() - make_interval(days => $1)',
+      [batch.retentionDays]
+    );
+
+    await client.query('COMMIT');
+    return { upserted, deleted, aged: agedRes.rowCount ?? 0 };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
     client.release();
   }
-  return counts;
+}
+
+/** Hydrate the in-memory store: the claimable set still inside the window. */
+export async function loadClaimableIssues(
+  pool: pg.Pool,
+  retentionDays: number
+): Promise<StoredIssue[]> {
+  const { rows } = await pool.query<StoredIssue>(
+    `SELECT ${ISSUE_COLS} FROM issues
+     WHERE is_open AND NOT is_assigned AND linked_prs = 0
+       AND created_at >= now() - make_interval(days => $1)
+     ORDER BY created_at DESC`,
+    [retentionDays]
+  );
+  return rows;
+}
+
+/** Hydrate the store's per-language watermarks and poll heartbeat. */
+export async function loadPollState(pool: pg.Pool): Promise<PollState[]> {
+  const { rows } = await pool.query<PollState>(
+    'SELECT language, watermark, last_poll_at, last_poll_count FROM poll_state'
+  );
+  return rows;
 }
 
 /**
@@ -156,28 +328,41 @@ export interface VerificationUpdate {
   linkedPrs: number;
 }
 
+/** Batch counterpart of the per-issue UPDATE loop this used to run. */
 export async function applyVerification(
   pool: pg.Pool,
   updates: VerificationUpdate[]
 ): Promise<{ stillClaimable: number; retired: number }> {
   let stillClaimable = 0;
   let retired = 0;
-  const client = await pool.connect();
-  try {
-    for (const u of updates) {
-      await client.query(
-        `UPDATE issues
-         SET is_open = $2, is_assigned = $3, comments = $4, linked_prs = $5,
-             last_verified_at = now()
-         WHERE id = $1`,
-        [u.id, u.isOpen, u.isAssigned, u.comments, u.linkedPrs]
-      );
-      if (u.isOpen && !u.isAssigned && u.linkedPrs === 0) stillClaimable++;
-      else retired++;
-    }
-  } finally {
-    client.release();
+  for (const u of updates) {
+    if (u.isOpen && !u.isAssigned && u.linkedPrs === 0) stillClaimable++;
+    else retired++;
   }
+  if (updates.length === 0) return { stillClaimable, retired };
+
+  await pool.query(
+    `UPDATE issues AS i SET
+       is_open          = v.is_open,
+       is_assigned      = v.is_assigned,
+       comments         = v.comments,
+       linked_prs       = v.linked_prs,
+       last_verified_at = now()
+     FROM jsonb_to_recordset($1::jsonb)
+       AS v(id text, is_open boolean, is_assigned boolean, comments integer, linked_prs integer)
+     WHERE i.id = v.id`,
+    [
+      JSON.stringify(
+        updates.map((u) => ({
+          id: u.id,
+          is_open: u.isOpen,
+          is_assigned: u.isAssigned,
+          comments: u.comments,
+          linked_prs: u.linkedPrs,
+        }))
+      ),
+    ]
+  );
   return { stillClaimable, retired };
 }
 
@@ -206,6 +391,11 @@ export interface FeedQuery {
   sort?: 'newest' | 'stars' | 'stars_asc' | 'comments' | 'comments_asc';
 }
 
+/**
+ * Direct read of the feed from Postgres. The API no longer uses this (it
+ * answers from the in-memory store); it remains for the `feed` CLI command
+ * and any out-of-band tooling.
+ */
 export async function readFeed(pool: pg.Pool, query: FeedQuery): Promise<FeedRow[]> {
   // The feed only ever shows still-claimable issues (enrichment flips these).
   const where: string[] = ['is_open', 'NOT is_assigned', 'linked_prs = 0'];

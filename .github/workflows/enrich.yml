@@ -1,7 +1,14 @@
 name: enrich-issues
+# Manual only. Enrichment now runs inside the Render process (see FeedStore in
+# src/store.ts): it picks candidates from the in-memory snapshot, calls GitHub,
+# and lets the results ride along on the next batched flush, so a full
+# re-verification pass costs zero extra Neon compute windows.
+#
+# This workflow remains as a break-glass path for running a pass against
+# Postgres directly when the API is not up. It writes through immediately, so
+# each run wakes the compute for a full autosuspend window; do not put it back
+# on a schedule.
 on:
-  schedule:
-    - cron: "17 */6 * * *"   # every 6 hours (slower cron per spec §12 Phase 3)
   workflow_dispatch: {}
 jobs:
   enrich:
@@ -14,9 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: npm ci
-      # Actions run fresh code against whatever schema the DB has; migrations
-      # are idempotent, so apply them here too instead of racing the Render
-      # deploy (which migrates on npm start).
+      # Manual runs may predate a schema change, so migrate here (idempotent).
       - run: npm run migrate
         env:
           GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }} # loadConfig requires it even for migrate
@@ -26,4 +31,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENRICH_MAX_ISSUES: "500"
-          RETENTION_DAYS: "5"
+          RETENTION_DAYS: "2"

@@ -23,5 +23,15 @@ services:
         value: javascript,typescript,python,go,rust,java
       - key: ENRICH_MAX_ISSUES
         value: "500"
-      - key: RETENTION_DAYS
-        value: "5"
+      - key: RETENTION_DAYS # 2-day freshness window; also small enough that one
+        value: "2"          # enrich pass re-verifies the whole feed
+      # Neon bills wall-clock time its compute is awake and autosuspends after 5
+      # idle minutes, so a write window costs ~5 minutes however small the batch.
+      # Reads never touch Postgres (see src/store.ts); these three knobs are the
+      # entire database workload.
+      - key: DB_FLUSH_MINUTES # 48 wakes/day ~= 32 CU-hrs/month of the 100 free
+        value: "30"
+      - key: ENRICH_INTERVAL_MINUTES # GitHub-only; results ride the next flush
+        value: "360"
+      - key: SNAPSHOT_RELOAD_MINUTES # re-sync after a flush, never its own wake
+        value: "360"

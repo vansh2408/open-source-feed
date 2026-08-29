@@ -2,11 +2,11 @@ import { startApi } from './api.js';
 import { loadConfig } from './config.js';
 import { createPool, migrate, readFeed } from './db.js';
 import { enrichOnce } from './enrich.js';
-import { pollOnce, pollWatch } from './poller.js';
+import { dbSink, pollOnce, pollWatch } from './poller.js';
 
 function usage(): never {
   console.error(
-    'Usage: tsx src/index.ts <migrate | poll:once [language] | poll:watch | enrich | api | feed [limit]>'
+    'Usage: tsx src/index.ts <migrate | serve | poll:once [language] | poll:watch | enrich | api | feed [limit]>'
   );
   process.exit(1);
 }
@@ -34,7 +34,8 @@ async function main(): Promise<void> {
           console.error('Fatal: LANGUAGES is empty.');
           process.exit(1);
         }
-        await pollOnce(pool, config, languages);
+        // Write-through: a one-shot CLI process has nowhere to buffer.
+        await pollOnce(dbSink(pool), config, languages);
         break;
       }
 
@@ -45,12 +46,35 @@ async function main(): Promise<void> {
 
       case 'poll:watch': {
         oneShot = false;
-        await pollWatch(pool, config);
+        await pollWatch(dbSink(pool), config);
         break;
       }
 
       case 'api': {
         oneShot = false;
+        await startApi(pool, config);
+        break;
+      }
+
+      // Production entrypoint (`npm start`): migrate, then serve.
+      //
+      // A failed migration warns instead of aborting. The feed is served from
+      // memory and refilled from GitHub, so an unreachable database costs
+      // freshness of the persisted copy, not availability of the site - and
+      // exiting here would turn a database outage into a Render crash loop
+      // with nothing served at all. Migrations are idempotent DDL, so the next
+      // boot reapplies them; a genuinely broken migration still surfaces
+      // loudly in the logs and in every failed flush.
+      case 'serve': {
+        oneShot = false;
+        try {
+          await migrate(pool);
+        } catch (err) {
+          console.error(
+            'WARNING: migrations failed, serving anyway:',
+            err instanceof Error ? err.message : err
+          );
+        }
         await startApi(pool, config);
         break;
       }

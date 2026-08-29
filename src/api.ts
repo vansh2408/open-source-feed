@@ -6,9 +6,10 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import type { Config } from './config.js';
-import { listLanguages, readFeed, type FeedQuery, type FeedRow } from './db.js';
+import type { FeedQuery } from './db.js';
 import { pollOnce } from './poller.js';
 import { llmsTxt, renderAppPage, robotsTxt, sitemapXml } from './seo.js';
+import { FeedStore } from './store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(__dirname, '..', 'public', 'index.html');
@@ -74,38 +75,56 @@ function xmlEscape(s: string): string {
   });
 }
 
-/** Lean read API + static frontend + Atom feed. */
+/**
+ * Lean read API + static frontend + Atom feed.
+ *
+ * Nothing on the request path touches Postgres. Every read is answered from
+ * the in-memory store (see store.ts), which is hydrated once at boot and kept
+ * current by the poller; the database is woken only by the store's periodic
+ * batched flush. Serving reads from Postgres is what exhausted Neon's monthly
+ * compute allowance, because each query keeps the compute billable for a full
+ * five-minute autosuspend window regardless of how trivial it is.
+ */
 export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
+  const store = new FeedStore(pool, config);
+  await store.hydrate();
+  store.start();
+
   // trustProxy: behind Render's proxy the client IP arrives in
   // x-forwarded-for; without this the rate limiter would bucket every
   // visitor under the proxy's IP.
   const app = Fastify({ logger: false, trustProxy: true });
 
   // Per-IP limit, in-memory (single instance). Generous enough for a human
-  // plus an aggressive feed reader; stops one client from burning the DB.
+  // plus an aggressive feed reader.
   await app.register(rateLimit, {
     max: 120,
     timeWindow: '1 minute',
     allowList: (req) => req.url === '/health', // Render's own health checks
   });
 
-  // The app shell is served with the first page of issues server-rendered
-  // into it: crawlers (and AI bots, which mostly don't run JS) see real
-  // content; the client script re-renders over it on load. On any SSR
-  // failure the plain shell is served, never an error page.
-  const ssrIssues = async (language?: string): Promise<FeedRow[]> => {
-    try {
-      return await readFeed(pool, { limit: SSR_ISSUE_COUNT, ...(language ? { language } : {}) });
-    } catch (err) {
-      console.error('SSR feed query failed:', err instanceof Error ? err.message : err);
-      return [];
-    }
+  const tokenAuthorized = (req: FastifyRequest): boolean => {
+    if (!config.pollTriggerToken) return false;
+    const auth = req.headers.authorization;
+    const presented = auth?.startsWith('Bearer ')
+      ? auth.slice('Bearer '.length)
+      : (req.query as Record<string, string | undefined>).token;
+    if (!presented) return false;
+    const a = Buffer.from(presented);
+    const b = Buffer.from(config.pollTriggerToken);
+    return a.length === b.length && timingSafeEqual(a, b);
   };
+
+  // The app shell is served with the first page of issues rendered into it:
+  // crawlers (and AI bots, which mostly don't run JS) see real content; the
+  // client script re-renders over it on load.
+  const ssrIssues = (language?: string) =>
+    store.query({ limit: SSR_ISSUE_COUNT, ...(language ? { language } : {}) });
 
   app.get('/', async (_req, reply) => {
     reply.type('text/html; charset=utf-8');
     const template = await readFile(INDEX_HTML, 'utf8');
-    return renderAppPage(template, await ssrIssues());
+    return renderAppPage(template, ssrIssues());
   });
 
   // Language landing pages (/python, /rust, ...): same app, preset filter,
@@ -115,7 +134,7 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     if (!config.languages.includes(lang)) return reply.callNotFound();
     reply.type('text/html; charset=utf-8');
     const template = await readFile(INDEX_HTML, 'utf8');
-    return renderAppPage(template, await ssrIssues(lang), { lang });
+    return renderAppPage(template, ssrIssues(lang), { lang });
   });
 
   app.get('/about', async (_req, reply) => {
@@ -149,7 +168,16 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     return readFile(OG_PNG);
   });
 
-  app.get('/health', async () => {
+  // Liveness only, and deliberately database-free: Render probes this
+  // continuously, and a `SELECT 1` here was on its own enough to hold the Neon
+  // compute awake around the clock (~182 CU-hrs/month against a 100 CU-hr
+  // allowance). Feed staleness is visible via /status instead.
+  app.get('/health', async () => ({ ok: true, issues: store.size() }));
+
+  // Manual connectivity probe. Token-gated and never wired into any automated
+  // check, precisely because calling it costs a compute window.
+  app.get('/internal/health/db', async (req, reply) => {
+    if (!tokenAuthorized(req)) return reply.code(401).send({ error: 'unauthorized' });
     await pool.query('SELECT 1');
     return { ok: true };
   });
@@ -157,26 +185,16 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   // External-cron poll trigger (e.g. cron-job.org every 5 min). The ping also
   // keeps a free-tier host awake. Responds 202 immediately; the pass runs in
   // the background because a full multi-language pass outlives pinger timeouts.
+  // Results land in the in-memory store, not Postgres: they reach the database
+  // on the store's next batched flush.
   let pollRunning = false;
   let lastPoll: { startedAt: string; ok: boolean; inserted?: number; error?: string } | null = null;
-
-  const pollAuthorized = (req: FastifyRequest): boolean => {
-    if (!config.pollTriggerToken) return false;
-    const auth = req.headers.authorization;
-    const presented = auth?.startsWith('Bearer ')
-      ? auth.slice('Bearer '.length)
-      : (req.query as Record<string, string | undefined>).token;
-    if (!presented) return false;
-    const a = Buffer.from(presented);
-    const b = Buffer.from(config.pollTriggerToken);
-    return a.length === b.length && timingSafeEqual(a, b);
-  };
 
   const triggerPoll = async (req: FastifyRequest, reply: FastifyReply) => {
     if (!config.pollTriggerToken) {
       return reply.code(503).send({ error: 'POLL_TRIGGER_TOKEN not configured' });
     }
-    if (!pollAuthorized(req)) {
+    if (!tokenAuthorized(req)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
     if (pollRunning) {
@@ -184,7 +202,7 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
     }
     pollRunning = true;
     const startedAt = new Date().toISOString();
-    void pollOnce(pool, config)
+    void pollOnce(store, config)
       .then((results) => {
         const inserted = results.reduce((sum, r) => sum + r.inserted, 0);
         lastPoll = { startedAt, ok: true, inserted };
@@ -204,41 +222,30 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
   app.post('/internal/poll', triggerPoll);
   app.get('/internal/poll', triggerPoll);
 
-  app.get('/languages', async () => {
-    return { languages: await listLanguages(pool) };
+  app.get('/languages', async (_req, reply) => {
+    reply.header('cache-control', 'public, max-age=300');
+    return { languages: store.languages() };
   });
 
   // Poller heartbeat: drives the "next sync" countdown in the UI.
-  app.get('/status', async () => {
-    const { rows } = await pool.query<{ last_poll_at: Date | null }>(
-      'SELECT max(last_poll_at) AS last_poll_at FROM poll_state'
-    );
-    const last = rows[0]?.last_poll_at ?? null;
-    return {
-      lastPollAt: last,
-      pollIntervalSeconds: config.pollIntervalSeconds,
-      // Relative age so clients can schedule refreshes immune to their own
-      // clock skew (client clocks routinely drift by minutes).
-      secondsSinceLastPoll: last ? Math.max(0, Math.round((Date.now() - last.getTime()) / 1000)) : null,
-    };
-  });
+  app.get('/status', async () => store.status());
 
   // GET /issues?limit=50&offset=0&min_stars=500&labels=bug,help%20wanted&language=typescript
-  app.get('/issues', async (req) => {
-    const issues = await readFeed(
-      pool,
-      parseFeedQuery(req.query as Record<string, unknown>, config)
-    );
+  app.get('/issues', async (req, reply) => {
+    // Kept well under POLL_INTERVAL_SECONDS: the frontend's background check
+    // fires ~45s after a pass should have landed, and a longer window could
+    // serve it a response cached from just before the pass, under-reporting the
+    // "N new issues" pill for a whole cycle. This only saves Render CPU on
+    // repeat crawls - reads cost no database time either way.
+    reply.header('cache-control', 'public, max-age=30');
+    const issues = store.query(parseFeedQuery(req.query as Record<string, unknown>, config));
     return { count: issues.length, issues };
   });
 
   // Atom feed; accepts the same filter params as /issues, so subscribers can
   // follow e.g. /feed.xml?language=rust&labels=good%20first%20issue
   app.get('/feed.xml', async (req, reply) => {
-    const issues = await readFeed(
-      pool,
-      parseFeedQuery(req.query as Record<string, unknown>, config)
-    );
+    const issues = store.query(parseFeedQuery(req.query as Record<string, unknown>, config));
 
     const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
     const host = req.headers.host ?? `localhost:${config.port}`;
@@ -261,7 +268,9 @@ export async function startApi(pool: pg.Pool, config: Config): Promise<void> {
       )
       .join('\n');
 
-    reply.type('application/atom+xml; charset=utf-8');
+    reply
+      .type('application/atom+xml; charset=utf-8')
+      .header('cache-control', 'public, max-age=300');
     return `<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>open source feed: fresh, unassigned, claimable issues</title>
@@ -274,6 +283,30 @@ ${entries}
 </feed>`;
   });
 
+  // Render sends SIGTERM before replacing an instance; flush first so a
+  // redeploy never strands the write buffer.
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received: draining`);
+    try {
+      await app.close();
+      await store.shutdown();
+      await pool.end();
+    } catch (err) {
+      console.error('shutdown error:', err instanceof Error ? err.message : err);
+    }
+    process.exit(0);
+  };
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+
   const address = await app.listen({ port: config.port, host: '0.0.0.0' });
   console.log(`API listening on ${address}  (GET /, /issues, /feed.xml, /languages, /health)`);
+  console.log(
+    `store: flushing to Postgres every ${config.dbFlushMinutes}m, ` +
+      `enriching every ${config.enrichIntervalMinutes}m, ` +
+      `retention ${config.retentionDays}d`
+  );
 }

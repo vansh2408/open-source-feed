@@ -1,7 +1,17 @@
 name: poll-issues
+# Disaster recovery only. Primary polling is the Render service, which holds the
+# feed in memory and batches its writes; this workflow writes straight through to
+# Postgres, so every run wakes the Neon compute for a full five-minute autosuspend
+# window. At the old */30 cadence that was ~31 CU-hrs/month, a third of the free
+# allowance, for a path that only matters while Render is down (and while Render is
+# down, nobody can read the feed anyway).
+#
+# The daily run is a cheap floor: it keeps the watermark moving and the table
+# populated through a multi-day outage, for ~0.6 CU-hrs/month. The API absorbs
+# whatever it writes on its next snapshot reload (SNAPSHOT_RELOAD_MINUTES).
 on:
   schedule:
-    - cron: "*/30 * * * *"  # backup only: primary polling is the Render service via /internal/poll; BACKFILL_HOURS=24 covers any gap
+    - cron: "40 3 * * *"
   workflow_dispatch: {}
 jobs:
   poll:
@@ -14,11 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: npm ci
-      # Same reasoning as enrich.yml: never run fresh code against a stale schema.
-      - run: npm run migrate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_FEED_TOKEN }} # loadConfig requires it even for migrate
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # No migrate step: Render migrates on start, and re-running four DDL
+      # statements here only bought another compute window.
       - run: npm run poll:once
         env:
           # Custom PAT secret, NOT the auto-injected GITHUB_TOKEN

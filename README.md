@@ -13,13 +13,39 @@ that are already taken.
 
 | Cadence | Job | What it does |
 |---|---|---|
-| every 5 min | `poll:once` (GitHub Actions cron) | Fetches issues created since the last check per language, filters by stars/archived client-side, upserts into Postgres. A per-language watermark keeps steady-state polls tiny. |
-| every 6 h | `enrich` (GitHub Actions cron) | Re-verifies stored issues against GitHub: anything closed, assigned, or deleted is flagged out of the feed; comment counts refresh. Then retention deletes retired rows and anything older than `RETENTION_DAYS`. |
-| every 60 s | frontend | The page re-reads the local database. Never touches GitHub. |
+| every 5 min | `pollOnce` (external pinger hits `/internal/poll`) | Fetches issues created since the last check per language, filters by stars/archived client-side, and records them in the **in-memory store**. A per-language watermark keeps steady-state polls tiny. Readers see new issues immediately; Postgres does not. |
+| every 30 min | store flush | Everything buffered since the last flush — upserts, retirements, watermarks, retention — committed to Postgres in **one transaction on one connection**. This is the only routine database write. |
+| every 6 h | enrichment (in-process) | Re-verifies stored issues against GitHub: anything closed, assigned, or PR-linked drops out of the feed; comment counts refresh. Candidates come from memory and results ride the next flush, so a full pass costs no extra database time. |
+| on next poll | frontend | The page re-checks just after a poll pass should have landed and reveals an "N new issues" pill. Reads are served from memory. |
 
 Key design point: the GitHub issue search never sees a star filter (`stars:` is invalid for
 issue search). Star counts come back as a field per result and are filtered in our code:
 `src/github.ts` has a runtime guard that throws if `stars:` ever enters a query.
+
+### Why reads never touch Postgres
+
+Neon bills for **wall-clock time the compute is awake**, not per query, and it autosuspends
+after 5 idle minutes. One `SELECT 1` therefore costs the same 5-minute window as a full write
+batch. On the free tier, 100 CU-hrs ÷ 0.25 CU = 400 awake-hours/month, i.e. the database may
+be awake at most ~54% of the time.
+
+Serving the feed from Postgres blew straight through that: a `SELECT 1` in `/health` (probed
+continuously by Render) pinned the compute awake on its own, at ~182 CU-hrs/month. So
+`src/store.ts` holds the claimable feed in memory as the runtime source of truth, and
+Postgres is demoted to a periodic durable checkpoint.
+
+Durability rests on one invariant: **a language's watermark is persisted only in the same
+transaction as the issues it covers.** Losing the buffer to a crash, redeploy or spin-down
+rewinds nothing — the next boot reads the older watermark and refetches the gap from GitHub,
+with `BACKFILL_HOURS` as the backstop.
+
+This makes the API single-writer, and correct only while it runs as **one instance**.
+
+A useful side effect: the site no longer depends on the database being up. `npm start`
+(`serve`) warns and continues if migrations fail, `hydrate` starts with an empty snapshot if
+Postgres is unreachable, and a failed flush retains its buffer for the next interval. A dead
+database costs freshness of the persisted copy, not availability — the poller refills memory
+from GitHub within one cycle and the first successful flush catches everything up.
 
 Rate budget: a full 6-language poll costs roughly 6 to 60 points of GitHub's 5,000/hour GraphQL
 allowance. `rateLimit` is checked on every request with backoff below a safety buffer,
@@ -65,11 +91,18 @@ npm run api             # open http://localhost:3000
 - `GET /feed.xml`: Atom feed; accepts the same params, so filtered subscriptions work
 - `GET /languages`: distinct languages present (drives the UI dropdown)
 - `GET /status`: poller heartbeat (`lastPollAt`), drives the UI sync countdown
-- `GET /health`: DB liveness
+- `GET /health`: process liveness and the in-memory issue count. **Deliberately does not
+  touch Postgres** — Render probes it continuously, and a `SELECT 1` here was on its own
+  enough to hold the Neon compute awake around the clock
+- `GET /internal/health/db`: token-gated manual connectivity probe. Never wire this into an
+  automated health check; calling it costs a compute window
 - `GET|POST /internal/poll`: trigger one polling pass (for external cron pingers).
   Requires `POLL_TRIGGER_TOKEN` via `Authorization: Bearer` header or `?token=`;
   responds `202` immediately and runs the pass in the background, `busy` if one
   is already running
+
+Every read above is answered from memory. `/issues` and `/feed.xml` also send a short
+`cache-control`, so repeat crawls and multi-tab readers need not even reach the origin.
 
 ## Configuration
 
@@ -85,11 +118,14 @@ are missing.
 | `BACKFILL_HOURS` | 24 | Cold-start lookback window |
 | `POLL_INTERVAL_SECONDS` | 180 | `poll:watch` spacing; also drives the UI countdown |
 | `LABEL_FILTER` | (empty) | Optional CSV; one query pass per label |
-| `RETENTION_DAYS` | 5 | Issues older than this are deleted |
-| `ENRICH_MAX_ISSUES` | 500 | Re-verifications per enrich run |
+| `RETENTION_DAYS` | 2 | Issues older than this leave the feed. Small enough that one enrich pass re-verifies the whole set, so "verified claimable" stays literally true |
+| `ENRICH_MAX_ISSUES` | 500 | Re-verifications per enrich pass |
 | `FEED_PAGE_SIZE` | 50 | Default API page size |
 | `PORT` | 3000 | API port |
 | `POLL_TRIGGER_TOKEN` | (unset) | Shared secret enabling `/internal/poll`; endpoint is off when unset |
+| `DB_FLUSH_MINUTES` | 30 | Minutes between batched writes to Postgres. **The main cost dial**: each flush wakes the Neon compute for ~5 minutes regardless of batch size, so 30 min ≈ 32 CU-hrs/month and 60 min ≈ 16, against a 100 CU-hr free allowance |
+| `ENRICH_INTERVAL_MINUTES` | 360 | Claimability re-verification. Calls GitHub only; results ride the next flush, so this costs no database time |
+| `SNAPSHOT_RELOAD_MINUTES` | 360 | Re-sync memory from Postgres, absorbing out-of-band writes. Only ever runs straight after a successful flush, so it shares that compute window |
 
 ## Deploying
 
@@ -106,9 +142,15 @@ Render with an external pinger driving the poll cadence.
    `Authorization: Bearer <POLL_TRIGGER_TOKEN>` (copy the generated value from the
    Render dashboard). This one ping both triggers a polling pass and keeps the
    free-tier service from sleeping. `POLL_INTERVAL_SECONDS=300` in `render.yaml`
-   keeps the UI countdown honest.
+   keeps the UI countdown honest. Polling this often is cheap now: a pass writes to
+   memory, and only the 30-minute flush reaches Postgres.
 3. **GitHub Actions backup**: add Actions secrets `GH_FEED_TOKEN` (your PAT,
    deliberately **not** the auto-injected `GITHUB_TOKEN`, so polling uses your own
-   API quota) and `DATABASE_URL`. The workflows then poll every 30 minutes as a
-   fallback (covers pinger/host outages via `BACKFILL_HOURS=24`) and enrich every
-   6 hours.
+   API quota) and `DATABASE_URL`. `poll.yml` runs once daily as a floor that keeps
+   the table populated through a multi-day Render outage; `enrich.yml` is
+   `workflow_dispatch` only, since enrichment now runs in-process. Both write
+   straight through to Postgres, so **do not put either back on a frequent
+   schedule** — at `*/30`, `poll.yml` alone cost ~31 CU-hrs/month.
+4. **Neon**: check *Branch → Compute → Edit → Scale to zero*. The default 5-minute
+   delay is a multiplier on every single wake; if your plan allows 1 minute, the
+   whole workload gets ~5× cheaper.

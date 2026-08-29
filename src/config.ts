@@ -12,6 +12,12 @@ export interface Config {
   port: number;
   enrichMaxIssues: number;
   retentionDays: number;
+  /** Minutes between batched writes to Postgres from the in-memory store. */
+  dbFlushMinutes: number;
+  /** Minutes between claimability re-verification passes (GitHub only). */
+  enrichIntervalMinutes: number;
+  /** Minutes between snapshot re-syncs, folded into an existing flush. */
+  snapshotReloadMinutes: number;
   /** Shared secret for POST /internal/poll; endpoint is disabled when unset. */
   pollTriggerToken: string | null;
 }
@@ -60,7 +66,14 @@ export function loadConfig(): Config {
     feedPageSize: intEnv('FEED_PAGE_SIZE', 50),
     port: intEnv('PORT', 3000),
     enrichMaxIssues: intEnv('ENRICH_MAX_ISSUES', 500),
-    retentionDays: intEnv('RETENTION_DAYS', 5),
+    retentionDays: intEnv('RETENTION_DAYS', 2),
+    // Neon bills for wall-clock time its compute is awake and autosuspends
+    // after five idle minutes, so every write window costs ~5 minutes however
+    // small the batch. Writing every 30 minutes instead of every poll is what
+    // keeps the monthly compute allowance from being spent by mid-month.
+    dbFlushMinutes: intEnv('DB_FLUSH_MINUTES', 30),
+    enrichIntervalMinutes: intEnv('ENRICH_INTERVAL_MINUTES', 360),
+    snapshotReloadMinutes: intEnv('SNAPSHOT_RELOAD_MINUTES', 360),
     pollTriggerToken: process.env.POLL_TRIGGER_TOKEN?.trim() || null,
   };
 }

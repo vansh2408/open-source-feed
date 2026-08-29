@@ -1,12 +1,47 @@
 import type pg from 'pg';
 import type { Config } from './config.js';
-import { getPollState, updatePollState, upsertIssues } from './db.js';
+import { getPollState, updatePollState, upsertIssues, type UpsertCounts } from './db.js';
 import { filterIssues, labelNames } from './filter.js';
 import { buildSearchQuery, searchAllIssues, sleep, toSearchIso } from './github.js';
 import type { IssueNode, IssueRow, PollResult } from './types.js';
 
 /** Pause between search passes (labels/languages) for the secondary limit. */
 const INTER_PASS_DELAY_MS = 2000;
+
+/**
+ * Where a poll pass reads its watermark from and writes its results to.
+ *
+ * Two implementations exist because the two callers have opposite cost
+ * profiles. The API process polls every few minutes and uses the in-memory
+ * store, which buffers writes so that hundreds of passes share a handful of
+ * Neon compute windows. The CLI (`poll:once`, used by the manual Actions
+ * recovery run) is a short-lived process with nowhere to buffer, so it writes
+ * straight through.
+ */
+export interface PollSink {
+  watermarkFor(language: string): Promise<Date | null>;
+  record(
+    language: string,
+    rows: IssueRow[],
+    watermark: Date,
+    kept: number
+  ): Promise<UpsertCounts>;
+}
+
+/** Write-through sink for one-shot CLI runs. */
+export function dbSink(pool: pg.Pool): PollSink {
+  return {
+    async watermarkFor(language) {
+      const state = await getPollState(pool, language);
+      return state?.watermark ?? null;
+    },
+    async record(language, rows, watermark, kept) {
+      const counts = await upsertIssues(pool, rows);
+      await updatePollState(pool, language, watermark, kept);
+      return counts;
+    },
+  };
+}
 
 function toRow(issue: IssueNode, language: string): IssueRow {
   return {
@@ -28,19 +63,19 @@ function toRow(issue: IssueNode, language: string): IssueRow {
 /**
  * One polling pass for one language (§5). When LABEL_FILTER is set, runs one
  * search per label (§6: one label per query) against the same watermark and
- * merges results by node id before upserting.
+ * merges results by node id before recording.
  */
 export async function pollLanguage(
-  pool: pg.Pool,
+  sink: PollSink,
   config: Config,
   language: string
 ): Promise<PollResult> {
-  const state = await getPollState(pool, language);
+  const stored = await sink.watermarkFor(language);
   const floor = new Date(Date.now() - config.backfillHours * 3600_000);
-  const since = state ? state.watermark : floor;
+  const since = stored ?? floor;
   const sinceIso = toSearchIso(since);
 
-  console.log(`[${language}] polling since ${sinceIso}${state ? '' : ' (cold start floor)'}`);
+  console.log(`[${language}] polling since ${sinceIso}${stored ? '' : ' (cold start floor)'}`);
 
   // One pass with no label narrowing, or one pass per configured label.
   const labelPasses: Array<string | null> =
@@ -69,12 +104,12 @@ export async function pollLanguage(
   }
 
   const kept = filterIssues(fetched, config);
-  const { inserted, updated } = await upsertIssues(
-    pool,
-    kept.map((issue) => toRow(issue, language))
+  const { inserted, updated } = await sink.record(
+    language,
+    kept.map((issue) => toRow(issue, language)),
+    maxCreated,
+    kept.length
   );
-
-  await updatePollState(pool, language, maxCreated, kept.length);
 
   const result: PollResult = {
     language,
@@ -95,13 +130,13 @@ export async function pollLanguage(
 
 /** Single pass over every configured language, then exits (poll:once). */
 export async function pollOnce(
-  pool: pg.Pool,
+  sink: PollSink,
   config: Config,
   languages: string[] = config.languages
 ): Promise<PollResult[]> {
   const results: PollResult[] = [];
   for (const [i, language] of languages.entries()) {
-    results.push(await pollLanguage(pool, config, language));
+    results.push(await pollLanguage(sink, config, language));
     if (i < languages.length - 1) await sleep(INTER_PASS_DELAY_MS);
   }
   const totals = results.reduce(
@@ -113,11 +148,11 @@ export async function pollOnce(
 }
 
 /** Loop forever with POLL_INTERVAL_SECONDS between passes (poll:watch). */
-export async function pollWatch(pool: pg.Pool, config: Config): Promise<never> {
+export async function pollWatch(sink: PollSink, config: Config): Promise<never> {
   console.log(`poll:watch started (interval ${config.pollIntervalSeconds}s, languages: ${config.languages.join(', ')})`);
   for (;;) {
     try {
-      await pollOnce(pool, config);
+      await pollOnce(sink, config);
     } catch (err) {
       console.error('poll pass failed:', err instanceof Error ? err.message : err);
     }

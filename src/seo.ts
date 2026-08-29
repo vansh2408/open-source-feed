@@ -209,7 +209,7 @@ export function llmsTxt(languages: string[]): string {
 > Live feed of fresh, unassigned open-source GitHub issues from popular
 > repositories (100 stars or more). Every listed issue is verified claimable:
 > open, unassigned, and with no pull request already linked to close it.
-> Issues appear minutes after they are opened and expire after five days,
+> Issues appear minutes after they are opened and expire after two days,
 > so everything shown is recent enough to be worth claiming.
 
 Languages covered: ${langList}.
