@@ -1,6 +1,8 @@
 # deps / build
 node_modules/
 dist/
+build/
+coverage/
 *.tsbuildinfo
 
 # secrets
