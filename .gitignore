@@ -10,12 +10,6 @@ coverage/
 .env.local
 .env.*.local
 
-# claude / AI assistant artifacts
-.claude/
-CLAUDE.md
-CLAUDE.local.md
-.mcp.json
-
 # os / editor
 .DS_Store
 .vscode/

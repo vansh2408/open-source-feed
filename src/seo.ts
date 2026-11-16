@@ -174,8 +174,7 @@ export function renderAppPage(template: string, issues: FeedRow[], opts: PageOpt
 }
 
 export function robotsTxt(): string {
-  // Everything public is crawlable, including by AI crawlers (GPTBot,
-  // ClaudeBot, PerplexityBot, Google-Extended and friends fall under *).
+  // Everything public is crawlable, AI crawlers included (they fall under *).
   return `User-agent: *
 Allow: /
 Disallow: /internal/
